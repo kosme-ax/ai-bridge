@@ -46,26 +46,33 @@ def generate_work_order(
 ) -> dict[str, Any]:
     """AX 지원용 과업지시서(핵심 산출물). 진단은 입력, 본 함수가 본업."""
     kdoctor = company.get("kdoctor") or {}
+    fitness = company.get("fitness") or (diagnosis or {}).get("fitness") or {}
+    ai_areas = fitness.get("ai_areas") or kdoctor.get("ai_areas") or []
+    ai_problems = fitness.get("ai_problems") or kdoctor.get("ai_problems") or []
     context = (
         f"기업: {company}\n"
         f"K-Doctor 진단 연동: {kdoctor}\n"
+        f"기초체력(AX 자가진단형): {fitness}\n"
+        f"AI 적용 희망 영역: {ai_areas}\n"
+        f"해결하고 싶은 문제: {ai_problems}\n"
         f"추가 진단/분석 결과: {diagnosis or {}}"
     )
     prompt = f"""키워드: work_order
 당신은 중진공 AX 지원 담당자의 업무보조 AI입니다.
-K-Doctor 등에서 이미 끝난 '기업진단'을 다시 하지 말고,
-그 결과를 바탕으로 **AX 지원 과업지시서** 초안을 작성하십시오.
+K-Doctor AX 자가진단에서 끝난 '기업진단'을 다시 하지 말고,
+그 결과와 **AI 적용 희망 영역**을 바탕으로 **AX 지원 과업지시서** 초안을 작성하십시오.
 시장가격·임의 단가를 만들지 마십시오.
 
 반드시 강조할 것:
-- 과업 목적, 범위, 산출물, 일정(단계), 역할(발주/수행/검수), 검수기준, 위험·가정
+- 과업 목적·범위는 선택한 AI 적용 영역({ai_areas})과 해결 문제({ai_problems})에 맞출 것
+- 산출물, 일정(단계), 역할(발주/수행/검수), 검수기준, 위험·가정
 - 진단 결과에서 도출된 우선 과제와의 연결
 
 {context}
 
 JSON 키: title, summary, objectives, scope, deliverables, schedule_phases,
 roles, acceptance_criteria, assumptions, linked_diagnosis_points,
-sections(객체), human_review_risks
+target_ai_areas, sections(객체), human_review_risks
 """
     return generate_json(model_name, "work_order", prompt, context)
 

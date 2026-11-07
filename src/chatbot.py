@@ -11,17 +11,18 @@ from src.policies import POLICIES, recommend_policies
 CHAT_SYSTEM = """당신은 AI-Bridge 상담 도우미입니다.
 중진공 AX 지원 업무를 돕는 Streamlit 앱의 가이드입니다.
 
-앱 기능:
-1) 기초체력 — 데이터 Fitness 8문항 자가진단, 등급·교육 링크
-2) 과업지시서 — K-Doctor 진단 이후 AX 과업지시서 초안
-3) 견적 비교 — 공급사 견적 비교 (단가 차이만으로 부적정 단정 금지)
-4) 정책연계 — 기술자금·스마트화·지역주도형 AI 대전환 등 추천
-5) 더보기 — CSV 검증, K-Doctor 연동, 시스템 분석, 모델 비교
+앱 실행 순서(반드시 이 순서로 안내):
+1) 기초체력보기 — K-Doctor AX 자가진단형: AI 적용 희망 영역(최대2)·해결 문제(최대2)가 핵심, 이후 사업·데이터·운영 문항
+2) 과업지시서 작성 — 선택한 적용 영역을 반영한 AX 과업지시서 초안
+3) 업체 탐색 — AI 공급사 추천
+4) 견적비교 — 공급사 견적 비교 (단가 차이만으로 부적정 단정 금지)
+5) 정책연계 — 기술자금·스마트화·지역주도형 AI 대전환 등
+보조: 더보기 — CSV 검증, K-Doctor 연동, 시스템 분석, 모델 비교
 
 규칙:
 - 한국어, 짧고 토스처럼 친절하게.
 - 확인되지 않은 시장가·절감률을 만들지 말 것.
-- 사용자가 화면 메뉴로 가도록 안내하고, 필요하면 질문으로 정보 수집.
+- 다음 스텝 메뉴명으로 안내하고, 필요하면 질문으로 정보 수집.
 - 정책 일정·조건은 요약만 하고 공식 공고 확인을 권고.
 - 로그인·DB 없음을 묻으면: 세션만 사용, 업로드 비저장이라고 안내.
 """
@@ -54,6 +55,9 @@ def build_context(
             "level": (fitness or {}).get("level"),
             "total": (fitness or {}).get("total"),
             "tip": (fitness or {}).get("tip"),
+            "industry": (fitness or {}).get("industry"),
+            "ai_areas": (fitness or {}).get("ai_areas"),
+            "ai_problems": (fitness or {}).get("ai_problems"),
         }
         if fitness
         else None,
@@ -81,37 +85,47 @@ def _mock_reply(user_text: str, context_json: str) -> str:
         ctx = {}
     company = ((ctx.get("company") or {}).get("name")) or "선택 기업"
 
-    if any(k in user_text for k in ("기초", "체력", "피트니스", "자가진단")):
+    if any(k in user_text for k in ("기초", "체력", "피트니스", "자가진단", "적용")):
         fit = ctx.get("fitness")
         if fit:
+            areas = fit.get("ai_areas") or []
+            area_txt = " · ".join(areas) if areas else "미선택"
             return (
                 f"지금 {company} 기초체력은 **{fit.get('label')}** "
-                f"({fit.get('total')}점)입니다. {fit.get('tip')} "
-                "메뉴 「기초체력」에서 문항을 다시 조정할 수 있어요."
+                f"({fit.get('total')}점)이고, AI 적용 희망 영역은 **{area_txt}** 입니다. "
+                f"{fit.get('tip')} STEP 1에서 다시 고를 수 있어요."
             )
-        return "아직 기초체력 결과가 없어요. 상단 메뉴 「기초체력」에서 8문항을 체크해 주세요."
+        return (
+            "아직 기초체력 결과가 없어요. STEP 1 「기초체력보기」에서 "
+            "어디에 AI를 적용하고 싶은지부터 골라 주세요."
+        )
+
+    if any(k in user_text for k in ("업체", "공급사", "벤더", "추천")):
+        return (
+            "STEP 3 「업체 탐색」에서 과업·진단 키워드로 AI 공급사를 골라 드려요. "
+            "그다음 STEP 4 「견적비교」로 이어가면 됩니다."
+        )
 
     if any(k in user_text for k in ("과업", "지시서", "rfp", "로드맵")):
         return (
-            f"{company} 기준 과업지시서는 「과업지시서」 메뉴에서 만들 수 있어요. "
-            "K-Doctor 우선과제와 기초체력이 있으면 초안이 더 구체적입니다. "
-            "원하시면 우선 과업 범위를 알려 주세요."
+            f"{company} 기준 과업은 STEP 2 「과업지시서 작성」에서 만들 수 있어요. "
+            "끝나면 STEP 3 「업체 탐색」으로 넘어가세요."
         )
 
     if any(k in user_text for k in ("견적", "비교", "단가")):
         return (
-            "「견적 비교」에서 샘플 A/B 또는 CSV를 넣고 비교할 수 있어요. "
+            "STEP 4 「견적비교」에서 샘플 A/B 또는 CSV를 넣고 비교할 수 있어요. "
             "단가 차이만으로 부적정이라고 단정하지 않고, 범위·유지보수·보안을 같이 봅니다."
         )
 
     if any(k in user_text for k in ("정책", "자금", "융자", "대전환", "기술자금")):
         recs = ctx.get("recommended_now") or []
         lines = [f"- {r.get('name')}: {r.get('why')}" for r in recs[:3]]
-        body = "\n".join(lines) if lines else "- 정책연계 메뉴에서 전체 카탈로그를 보세요."
+        body = "\n".join(lines) if lines else "- STEP 5 「정책연계」에서 전체 카탈로그를 보세요."
         return (
             "지금 상황에 맞춰 이런 중진공·중기부 창구를 봐요.\n"
             f"{body}\n"
-            "일정·신청·담당은 「정책연계」 카드에 정리돼 있어요. (API 키 없을 때 Mock 안내)"
+            "일정·신청·담당은 STEP 5 「정책연계」 카드에 정리돼 있어요."
         )
 
     if any(k in text for k in ("csv", "엑셀", "파일명", "표준")):
@@ -122,8 +136,8 @@ def _mock_reply(user_text: str, context_json: str) -> str:
 
     return (
         f"안녕하세요. {company} 기준으로 도와드릴게요. "
-        "기초체력, 과업지시서, 견적 비교, 정책자금(기술자금·지역 AI 대전환) 중 "
-        "궁금한 걸 말해 주세요. (현재 Mock 상담 — API 키 있으면 더 자세히 답합니다)"
+        "순서는 ①기초체력보기 → ②과업지시서 작성 → ③업체 탐색 → ④견적비교 → ⑤정책연계 입니다. "
+        "궁금한 스텝을 말해 주세요."
     )
 
 

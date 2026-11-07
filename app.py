@@ -20,17 +20,29 @@ from src.csv_validate import (
 from src.docs import load_sample, read_upload
 from src.chatbot import build_context, reply_chat
 from src.fitness import (
-    QUESTION_BANK,
-    adapt_question_with_ai,
+    AI_AREAS,
+    INDUSTRIES,
+    KDOCTOR_AX_INTRO,
+    KDOCTOR_LOGIN,
+    LIKERT_QUESTIONS,
+    TOTAL_QUIZ_STEPS,
     fitness_from_kdoctor,
-    question_at,
+    likert_at,
+    problems_for_areas,
     score_fitness,
-    update_difficulty,
 )
 from src.policies import POLICIES, recommend_policies
 from src.reports import to_docx_bytes, to_pdf_bytes
 from src.sample_data import COMPANIES, sample_files
-from src.ui import inject_styles, page_header, policy_card, render_footer, soft_card, vendor_card
+from src.ui import (
+    inject_styles,
+    page_header,
+    policy_card,
+    render_footer,
+    render_stepper,
+    soft_card,
+    vendor_card,
+)
 from src.vendors import VENDORS, recommend_vendors
 
 st.set_page_config(
@@ -40,7 +52,22 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-PAGES = ("기초체력", "과업지시서", "견적 비교", "정책연계", "더보기")
+# 메인 실행 순서 (토스식 한 줄 플로우). 더보기는 보조.
+STEPS = (
+    "기초체력보기",
+    "과업지시서 작성",
+    "업체 탐색",
+    "견적비교",
+    "정책연계",
+)
+PAGES = STEPS + ("더보기",)
+
+# 이전 세션/북마크용 별칭 → 정식 스텝명
+_PAGE_ALIASES = {
+    "기초체력": "기초체력보기",
+    "과업지시서": "과업지시서 작성",
+    "견적 비교": "견적비교",
+}
 
 
 def init_state() -> None:
@@ -48,17 +75,53 @@ def init_state() -> None:
     st.session_state.setdefault("last_result", None)
     st.session_state.setdefault("last_title", "")
     st.session_state.setdefault("fitness", None)
-    st.session_state.setdefault("page", "기초체력")
+    st.session_state.setdefault("page", "기초체력보기")
     st.session_state.setdefault("more_choice", "CSV 검증")
     st.session_state.setdefault("chat_messages", [])
     st.session_state.setdefault("fit_path", None)  # None | kdoctor | quiz
-    st.session_state.setdefault("fit_step", 0)
-    st.session_state.setdefault("fit_difficulty", "normal")
+    st.session_state.setdefault("fit_step", 0)  # 0 industry, 1 areas, 2 problems, 3+ likert
     st.session_state.setdefault("fit_answers", {})
     st.session_state.setdefault("fit_answer_log", [])
-    st.session_state.setdefault("fit_current_q", None)
+    st.session_state.setdefault("fit_industry", None)
+    st.session_state.setdefault("fit_areas", [])
+    st.session_state.setdefault("fit_problems", [])
     settings = runtime_settings()
     st.session_state.setdefault("model_name", settings["default_model"])
+    # 구 페이지명 마이그레이션
+    cur = st.session_state.get("page")
+    if cur in _PAGE_ALIASES:
+        st.session_state.page = _PAGE_ALIASES[cur]
+
+
+def completed_steps() -> set[str]:
+    done: set[str] = set()
+    if st.session_state.get("fitness"):
+        done.add("기초체력보기")
+    if st.session_state.get("work_order_done") or st.session_state.get("last_title") == "AX과업지시서":
+        done.add("과업지시서 작성")
+    if st.session_state.get("vendors_viewed"):
+        done.add("업체 탐색")
+    if st.session_state.get("quotes_done") or st.session_state.get("last_title") == "견적비교":
+        done.add("견적비교")
+    if st.session_state.get("policies_viewed"):
+        done.add("정책연계")
+    return done
+
+
+def step_nav(prev: str | None, next_: str | None, *, key_prefix: str) -> None:
+    """화면 하단 이전/다음 스텝 이동."""
+    st.write("")
+    cols = st.columns(2)
+    if prev:
+        if cols[0].button(f"← {prev}", use_container_width=True, key=f"{key_prefix}_prev"):
+            navigate(prev)
+    else:
+        cols[0].write("")
+    if next_:
+        if cols[1].button(f"다음 · {next_}", type="primary", use_container_width=True, key=f"{key_prefix}_next"):
+            navigate(next_)
+    else:
+        cols[1].write("")
 
 
 def navigate(page: str, *, more: str | None = None) -> None:
@@ -105,8 +168,8 @@ def sidebar() -> tuple[str, dict]:
 
         with st.expander("안내"):
             st.write(
-                "국민제안의 접수·서식(기시행) 위에, 기초체력 체크·CSV 검증·과업지시서·견적비교를 "
-                "잇는 실행 레이어입니다. 시연은 합성 데이터만 사용합니다."
+                "실행 순서: ①기초체력보기 → ②과업지시서 작성 → ③업체 탐색 → ④견적비교 → ⑤정책연계. "
+                "시연은 합성 데이터만 사용합니다."
             )
     return model_name, company
 
@@ -175,21 +238,23 @@ def show_result(title: str, result: dict) -> None:
 
 
 def render_chat_panel(model_name: str, company: dict, page: str) -> None:
-    with st.expander("AI 상담 · 기초체력 · 과업 · 견적 · 정책", expanded=False):
-        st.caption("자세히 묻고 싶을 때 여기서 이어가세요. 화면 메뉴와 같이 쓰면 좋아요.")
+    with st.expander("AI 상담 · 스텝 안내", expanded=False):
+        st.caption("①기초체력 → ②과업지시서 → ③업체탐색 → ④견적비교 → ⑤정책연계")
         for msg in st.session_state.chat_messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         quick = None
-        if c1.button("기초체력", use_container_width=True, key="chat_q_fit"):
+        if c1.button("체력", use_container_width=True, key="chat_q_fit"):
             quick = "기초체력 결과가 어떻게 나왔고, 다음에 뭘 하면 좋을까요?"
-        if c2.button("과업지시서", use_container_width=True, key="chat_q_wo"):
+        if c2.button("과업", use_container_width=True, key="chat_q_wo"):
             quick = "과업지시서에 넣을 우선 과업을 짧게 잡아 주세요."
-        if c3.button("견적", use_container_width=True, key="chat_q_qt"):
+        if c3.button("업체", use_container_width=True, key="chat_q_vd"):
+            quick = "지금 과업에 맞는 AI 공급사를 추천해 주세요."
+        if c4.button("견적", use_container_width=True, key="chat_q_qt"):
             quick = "견적 비교할 때 어떤 항목을 보면 되나요?"
-        if c4.button("정책자금", use_container_width=True, key="chat_q_pol"):
+        if c5.button("정책", use_container_width=True, key="chat_q_pol"):
             quick = "지금 기업에 맞는 중진공 기술자금이나 지역 AI 대전환을 알려 주세요."
 
         prompt = st.chat_input("궁금한 점을 입력하세요")
@@ -226,10 +291,12 @@ def render_education(fit: dict) -> None:
 
 def render_vendor_recs(company: dict, *, key_prefix: str) -> None:
     wo = st.session_state.get("last_result") if st.session_state.get("last_title") == "AX과업지시서" else None
-    recs = recommend_vendors(company=company, work_order=wo, limit=8)
+    fit = st.session_state.get("fitness")
+    recs = recommend_vendors(company=company, work_order=wo, fitness=fit, limit=8)
     st.markdown("#### AI 공급사 추천")
+    focus = " · ".join((fit or {}).get("ai_areas") or []) or "과업·진단"
     st.caption(
-        f"과업·진단 키워드로 {len(VENDORS)}개 카탈로그 중 골라 둔 참고 목록입니다. "
+        f"{focus} 기준으로 {len(VENDORS)}개 카탈로그 중 골라 둔 참고 목록입니다. "
         "계약·단가 보증이 아니며 AI바우처 Pool·각사 공고를 확인하세요."
     )
     for i, v in enumerate(recs):
@@ -267,48 +334,181 @@ def render_policy_recs(company: dict, *, context: str, key_prefix: str) -> None:
 
 def _reset_quiz_state() -> None:
     st.session_state.fit_step = 0
-    st.session_state.fit_difficulty = "normal"
     st.session_state.fit_answers = {}
     st.session_state.fit_answer_log = []
-    st.session_state.fit_current_q = None
+    st.session_state.fit_industry = None
+    st.session_state.fit_areas = []
+    st.session_state.fit_problems = []
+
+
+def _finish_quiz() -> None:
+    used = [
+        {"id": q["id"], "text": q["text"], "options": q["options"]}
+        for q in LIKERT_QUESTIONS
+    ]
+    st.session_state.fitness = score_fitness(
+        st.session_state.fit_answers,
+        questions=used,
+        source="quiz",
+        extra={
+            "industry": st.session_state.get("fit_industry"),
+            "ai_areas": list(st.session_state.get("fit_areas") or []),
+            "ai_problems": list(st.session_state.get("fit_problems") or []),
+            "answer_log": st.session_state.fit_answer_log,
+        },
+    )
 
 
 def _render_fitness_result(company: dict) -> None:
     fit = st.session_state.get("fitness")
     if not fit:
         return
-    src = "K-Doctor 연동" if fit.get("source") == "kdoctor" else "적응형 문항"
+    src = "K-Doctor 연동" if fit.get("source") == "kdoctor" else "AX 자가진단형 체크"
     st.metric("기초체력", f"{fit['label']}  {fit['total']}/{fit['max_score']}")
     st.caption(f"산출 경로: {src}")
+    areas = fit.get("ai_areas") or []
+    problems = fit.get("ai_problems") or []
+    if areas:
+        soft_card(
+            "AI 적용 희망 영역",
+            " · ".join(areas)
+            + (f" · 업종 {fit.get('industry')}" if fit.get("industry") else ""),
+        )
+    if problems:
+        soft_card("해결하고 싶은 문제", " · ".join(problems))
     st.write(fit["tip"])
     if fit.get("kdoctor_summary"):
         soft_card("K-Doctor 요약", fit["kdoctor_summary"])
-    if fit.get("priority_tasks"):
+    if fit.get("priority_tasks") and not problems:
         soft_card("우선 과제", " · ".join(fit["priority_tasks"]))
     render_education(fit)
-    render_policy_recs(company, context="fitness", key_prefix="fit")
     st.write("")
-    soft_card("다음 단계", "표준 CSV를 검증하거나 과업지시서를 작성하세요.")
-    c1, c2, c3 = st.columns(3)
+    soft_card("다음 단계", "선택한 AI 적용 영역을 반영해 과업지시서 초안을 작성하세요.")
+    c1, c2 = st.columns(2)
     if c1.button("처음부터", use_container_width=True, key="fit_restart"):
         st.session_state.fitness = None
         st.session_state.fit_path = None
         _reset_quiz_state()
         st.rerun()
-    if c2.button("CSV 검증으로", use_container_width=True, key="go_csv"):
-        navigate("더보기", more="CSV 검증")
-    if c3.button("과업지시서로", type="primary", use_container_width=True, key="go_wo"):
-        navigate("과업지시서")
+    if c2.button("다음 · 과업지시서 작성", type="primary", use_container_width=True, key="go_wo"):
+        navigate("과업지시서 작성")
+
+
+def _render_quiz_focus(step: int) -> None:
+    """STEP 1: 업종 → AI 영역(최대2) → 문제(최대2)."""
+    st.progress(step / TOTAL_QUIZ_STEPS, text=f"AX 자가진단 체크 {step + 1} / {TOTAL_QUIZ_STEPS}")
+
+    if step == 0:
+        soft_card("STEP 1 · AI 필요 분야", "귀사의 업종을 먼저 고르세요. (K-Doctor AX 자가진단과 같은 흐름)")
+        industry = st.radio("귀사의 주요 업종은 무엇입니까?", INDUSTRIES, key="fit_ui_industry")
+        c1, c2 = st.columns(2)
+        if c1.button("이전 경로로", use_container_width=True, key="fit_quiz_back"):
+            st.session_state.fit_path = None
+            _reset_quiz_state()
+            st.rerun()
+        if c2.button("다음", type="primary", use_container_width=True, key="fit_quiz_next"):
+            st.session_state.fit_industry = industry
+            st.session_state.fit_step = 1
+            st.rerun()
+        return
+
+    if step == 1:
+        soft_card(
+            "STEP 1 · AI 적용 영역",
+            "어디에 AI를 적용하고 싶은지가 핵심입니다. 업무 영역에서 최대 2개까지 고르세요.",
+        )
+        areas = st.multiselect(
+            "귀사에서는 어떤 영역에 AI를 적용하고 싶습니까? (최대 2개)",
+            options=list(AI_AREAS),
+            default=[a for a in (st.session_state.get("fit_areas") or []) if a in AI_AREAS][:2],
+            max_selections=2,
+            key="fit_ui_areas",
+        )
+        c1, c2 = st.columns(2)
+        if c1.button("이전", use_container_width=True, key="fit_quiz_back"):
+            st.session_state.fit_step = 0
+            st.rerun()
+        if c2.button("다음", type="primary", use_container_width=True, key="fit_quiz_next"):
+            if not areas:
+                st.warning("적용하고 싶은 영역을 1개 이상 골라 주세요.")
+            else:
+                st.session_state.fit_areas = list(areas)
+                st.session_state.fit_problems = []
+                st.session_state.fit_step = 2
+                st.rerun()
+        return
+
+    # step == 2
+    areas = list(st.session_state.get("fit_areas") or [])
+    opts = problems_for_areas(areas)
+    soft_card(
+        "STEP 1 · 해결 문제",
+        f"선택한 영역({ ' · '.join(areas) })에서 해결하고 싶은 문제를 최대 2개 고르세요.",
+    )
+    problems = st.multiselect(
+        "해결하고 싶은 문제는 무엇입니까? (최대 2개)",
+        options=opts,
+        default=[p for p in (st.session_state.get("fit_problems") or []) if p in opts][:2],
+        max_selections=2,
+        key="fit_ui_problems",
+    )
+    c1, c2 = st.columns(2)
+    if c1.button("이전", use_container_width=True, key="fit_quiz_back"):
+        st.session_state.fit_step = 1
+        st.rerun()
+    if c2.button("다음", type="primary", use_container_width=True, key="fit_quiz_next"):
+        if not problems:
+            st.warning("해결하고 싶은 문제를 1개 이상 골라 주세요.")
+        else:
+            st.session_state.fit_problems = list(problems)
+            st.session_state.fit_step = 3
+            st.rerun()
+
+
+def _render_quiz_likert(step: int) -> None:
+    li = step - 3
+    q = likert_at(li)
+    st.progress(step / TOTAL_QUIZ_STEPS, text=f"AX 자가진단 체크 {step + 1} / {TOTAL_QUIZ_STEPS}")
+    soft_card(q["step"], q["topic"])
+    labels = [o[0] for o in q["options"]]
+    scores = {o[0]: o[1] for o in q["options"]}
+    choice = st.radio(q["text"], labels, key=f"fit_likert_{q['id']}")
+
+    c1, c2 = st.columns(2)
+    if c1.button("이전", use_container_width=True, key="fit_quiz_back"):
+        st.session_state.fit_step = step - 1
+        st.rerun()
+    if c2.button(
+        "완료" if li >= len(LIKERT_QUESTIONS) - 1 else "다음",
+        type="primary",
+        use_container_width=True,
+        key="fit_quiz_next",
+    ):
+        score = scores[choice]
+        st.session_state.fit_answers[q["id"]] = score
+        st.session_state.fit_answer_log.append(
+            {
+                "id": q["id"],
+                "topic": q["topic"],
+                "step": q["step"],
+                "choice_label": choice,
+                "score": score,
+                "text": q["text"],
+            }
+        )
+        st.session_state.fit_step = step + 1
+        if st.session_state.fit_step >= TOTAL_QUIZ_STEPS:
+            _finish_quiz()
+        st.rerun()
 
 
 def page_fitness() -> None:
     company = COMPANIES[st.session_state.company_key]
-    model_name = st.session_state.model_name
 
     page_header(
-        "고도화 ①",
-        "기초 체력,<br>진단부터 확인할게요",
-        "K-Doctor를 했으면 데이터를 불러오고, 아니면 수준에 맞춰 문항이 달라집니다.",
+        "STEP 1",
+        "어디에 AI를<br>쓰고 싶은가요?",
+        "K-Doctor AX 자가진단처럼, 적용 희망 영역부터 고른 뒤 사업·데이터·운영 준비를 확인합니다.",
     )
 
     if st.session_state.get("fitness"):
@@ -319,21 +519,19 @@ def page_fitness() -> None:
     if st.session_state.fit_path is None:
         soft_card(
             "먼저 확인할게요",
-            "중진공 K-Doctor(AI진단)를 이미 하셨나요? 하셨다면 합성 연동 데이터로 불러옵니다.",
+            "중진공 K-Doctor AX 자가진단을 이미 하셨나요? 하셨다면 연동 데이터로 불러옵니다.",
         )
         a1, a2 = st.columns(2)
         if a1.button("네, 진단했어요", type="primary", use_container_width=True, key="fit_kd_yes"):
             st.session_state.fit_path = "kdoctor"
             st.rerun()
-        if a2.button("아직 안 했어요", use_container_width=True, key="fit_kd_no"):
+        if a2.button("아직 안 했어요 · 여기서 체크", use_container_width=True, key="fit_kd_no"):
             st.session_state.fit_path = "quiz"
             _reset_quiz_state()
             st.rerun()
-        st.link_button(
-            "K-Doctor 바로가기",
-            "https://kdoctor.kosmes.or.kr/main.do?v=f",
-            use_container_width=True,
-        )
+        b1, b2 = st.columns(2)
+        b1.link_button("AX 자가진단 시작", KDOCTOR_AX_INTRO, use_container_width=True)
+        b2.link_button("K-Doctor 로그인", KDOCTOR_LOGIN, use_container_width=True)
         return
 
     # --- Path A: K-Doctor pull (test data) ---
@@ -344,6 +542,8 @@ def page_fitness() -> None:
             f"{company['name']} / AX수준 {kd.get('ax_level')} / {kd.get('status')}",
         )
         st.write(kd.get("summary", ""))
+        if kd.get("ai_areas"):
+            soft_card("AI 적용 희망 영역", " · ".join(kd["ai_areas"]))
         if kd.get("priority_tasks"):
             st.markdown("**우선 과제**")
             for t in kd["priority_tasks"]:
@@ -362,6 +562,7 @@ def page_fitness() -> None:
                 "source": "kdoctor",
                 "diagnosis_id": kd.get("diagnosis_id"),
                 "priority_tasks": kd.get("priority_tasks"),
+                "ai_areas": kd.get("ai_areas"),
                 "ax_level": kd.get("ax_level"),
             }
             st.session_state.last_title = "K-Doctor연동"
@@ -369,93 +570,34 @@ def page_fitness() -> None:
             st.rerun()
         return
 
-    # --- Path B: adaptive quiz (one question at a time) ---
+    # --- Path B: AX 자가진단형 체크 ---
     step = int(st.session_state.fit_step)
-    total = len(QUESTION_BANK)
-    if step >= total:
-        # safety
-        qs = [question_at(i, "normal") for i in range(total)]
-        st.session_state.fitness = score_fitness(st.session_state.fit_answers, questions=qs, source="quiz")
+    if step >= TOTAL_QUIZ_STEPS:
+        _finish_quiz()
         st.rerun()
         return
-
-    if st.session_state.fit_current_q is None:
-        q = question_at(step, st.session_state.fit_difficulty)
-        q = adapt_question_with_ai(
-            q,
-            previous_answers=st.session_state.fit_answer_log,
-            company_name=company.get("name", ""),
-            model_name=model_name,
-            chat_fn=reply_chat,
-        )
-        st.session_state.fit_current_q = q
+    if step < 3:
+        _render_quiz_focus(step)
     else:
-        q = st.session_state.fit_current_q
-
-    st.progress((step) / total, text=f"문항 {step + 1} / {total} · 난이도 {q['difficulty']}")
-    soft_card(q["topic"], "직전 답에 맞춰 질문 수준을 조정했어요." if step else "첫 문항부터 시작해 볼게요.")
-    if q.get("ai_rewritten"):
-        st.caption("AI가 문항 문구를 다듬었습니다.")
-
-    labels = [o[0] for o in q["options"]]
-    scores = {o[0]: o[1] for o in q["options"]}
-    choice = st.radio(q["text"], labels, horizontal=True, key=f"fit_step_{step}_{q['difficulty']}")
-
-    c1, c2 = st.columns(2)
-    if c1.button("이전 경로로", use_container_width=True, key="fit_quiz_back"):
-        st.session_state.fit_path = None
-        _reset_quiz_state()
-        st.rerun()
-    if c2.button("다음", type="primary", use_container_width=True, key="fit_quiz_next"):
-        score = scores[choice]
-        st.session_state.fit_answers[q["id"]] = score
-        st.session_state.fit_answer_log.append(
-            {
-                "id": q["id"],
-                "topic": q["topic"],
-                "difficulty": q["difficulty"],
-                "choice_label": choice,
-                "score": score,
-                "text": q["text"],
-            }
-        )
-        st.session_state.fit_difficulty = update_difficulty(st.session_state.fit_difficulty, score)
-        st.session_state.fit_step = step + 1
-        st.session_state.fit_current_q = None
-        if st.session_state.fit_step >= total:
-            used = [
-                {
-                    "id": row["id"],
-                    "text": row["text"],
-                    "options": next(
-                        b["levels"][row["difficulty"]]["options"]
-                        for b in QUESTION_BANK
-                        if b["id"] == row["id"]
-                    ),
-                }
-                for row in st.session_state.fit_answer_log
-            ]
-            st.session_state.fitness = score_fitness(
-                st.session_state.fit_answers,
-                questions=used,
-                source="quiz",
-                extra={"answer_log": st.session_state.fit_answer_log},
-            )
-        st.rerun()
+        _render_quiz_likert(step)
 
 
 def page_work_order(model_name: str, company: dict) -> None:
     page_header(
-        "핵심 기능",
-        "과업지시서를<br>바로 작성해요",
+        "STEP 2",
+        "과업지시서를<br>작성해요",
         "K-Doctor 진단과 기초체력 결과를 반영해 AX 지원 과업지시서 초안을 만듭니다.",
     )
     fit = st.session_state.get("fitness")
     if fit:
-        soft_card(f"기초체력 · {fit['label']}", fit["tip"])
+        areas = fit.get("ai_areas") or []
+        soft_card(
+            f"기초체력 · {fit['label']}",
+            (f"AI 적용 희망: {' · '.join(areas)}. " if areas else "") + fit["tip"],
+        )
         render_education(fit)
     else:
-        soft_card("기초체력 미실시", "먼저 「기초체력」에서 8문항을 체크하면 과업 톤이 맞춰집니다.")
+        soft_card("기초체력 미실시", "먼저 STEP 1 「기초체력보기」에서 AI 적용 영역을 고르면 과업 톤이 맞춰집니다.")
 
     kd = company.get("kdoctor") or {}
     soft_card(
@@ -476,15 +618,41 @@ def page_work_order(model_name: str, company: dict) -> None:
                 },
             )
         show_result("AX과업지시서", result)
+        st.session_state.work_order_done = True
 
-    if st.session_state.get("last_title") == "AX과업지시서":
-        render_vendor_recs(company, key_prefix="wo")
-        render_policy_recs(company, context="work_order", key_prefix="wo")
+    if st.session_state.get("work_order_done") or st.session_state.get("last_title") == "AX과업지시서":
+        soft_card("다음 단계", "과업에 맞는 AI 공급사를 골라 보세요.")
+        if st.button("다음 · 업체 탐색", type="primary", use_container_width=True, key="wo_to_vendors"):
+            navigate("업체 탐색")
+    else:
+        step_nav("기초체력보기", None, key_prefix="wo")
+
+
+def page_vendors(company: dict) -> None:
+    st.session_state.vendors_viewed = True
+    page_header(
+        "STEP 3",
+        "맞는 업체를<br>찾아볼게요",
+        "과업·진단 키워드로 공급사 카탈로그를 골라 드립니다. 계약·단가 보증은 아닙니다.",
+    )
+    wo = st.session_state.get("last_result") if st.session_state.get("last_title") == "AX과업지시서" else None
+    if not wo:
+        soft_card("과업지시서 권장", "STEP 2에서 과업지시서를 만들면 매칭이 더 정확해집니다.")
+    render_vendor_recs(company, key_prefix="vd")
+    with st.expander(f"전체 카탈로그 ({len(VENDORS)}개)"):
+        for i, v in enumerate(VENDORS):
+            item = dict(v)
+            item["match_score"] = 0
+            item["why"] = "카탈로그"
+            vendor_card(item)
+            st.link_button(v["name"], v["url"], use_container_width=True, key=f"vd_all_{v['id']}_{i}")
+    soft_card("다음 단계", "후보 업체의 견적을 받아 비교하세요.")
+    step_nav("과업지시서 작성", "견적비교", key_prefix="vd")
 
 
 def page_quotes(model_name: str, company: dict) -> None:
     page_header(
-        "핵심 기능",
+        "STEP 4",
         "견적을<br>비교해요",
         "과업 범위에 맞춰 공급사 견적을 정리합니다. CSV면 표준 컬럼도 함께 검사해요.",
     )
@@ -527,14 +695,19 @@ def page_quotes(model_name: str, company: dict) -> None:
             with st.spinner("비교 중…"):
                 result = compare_quotations(model_name, company, quote_text)
             show_result("견적비교", result)
+            st.session_state.quotes_done = True
 
-    if st.session_state.get("last_title") == "견적비교":
-        render_policy_recs(company, context="quote", key_prefix="qt")
+    if st.session_state.get("quotes_done") or st.session_state.get("last_title") == "견적비교":
+        soft_card("다음 단계", "견적·과업에 맞는 중진공 정책·자금을 확인하세요.")
+        if st.button("다음 · 정책연계", type="primary", use_container_width=True, key="qt_to_pol"):
+            navigate("정책연계")
+    else:
+        step_nav("업체 탐색", None, key_prefix="qt")
 
 
 def page_csv_validate() -> None:
     page_header(
-        "고도화 ②",
+        "부가 · CSV",
         "표준 CSV인지<br>바로 검사해요",
         "필수 컬럼·숫자형·파일명(기업명_사업명_문서종류)을 확인합니다.",
     )
@@ -585,31 +758,23 @@ def page_csv_validate() -> None:
         st.dataframe(report["preview"], use_container_width=True)
 
     if report["ok"] and st.button("과업지시서 작성으로", type="primary", use_container_width=True):
-        navigate("과업지시서")
+        navigate("과업지시서 작성")
 
 
 def page_policies(company: dict) -> None:
+    st.session_state.policies_viewed = True
     page_header(
-        "정책 킥",
-        "결과에 맞는<br>중진공 사업을 이어가요",
+        "STEP 5",
+        "정책·자금을<br>이어가요",
         "기술자금·스마트화 융자, 지역주도형 AI 대전환 등 개요·일정·신청·담당을 안내합니다.",
     )
     fit = st.session_state.get("fitness")
     if fit:
         soft_card(f"현재 기초체력 · {fit['label']}", fit["tip"])
     else:
-        soft_card("기초체력 미실시", "기초체력을 먼저 하면 추천이 더 정확해집니다.")
+        soft_card("기초체력 미실시", "STEP 1을 먼저 하면 추천이 더 정확해집니다.")
 
     render_policy_recs(company, context="work_order", key_prefix="pol_top")
-    render_vendor_recs(company, key_prefix="pol_v")
-
-    with st.expander(f"AI 공급사 전체 목록 ({len(VENDORS)}개)"):
-        for i, v in enumerate(VENDORS):
-            item = dict(v)
-            item["match_score"] = 0
-            item["why"] = "카탈로그"
-            vendor_card(item)
-            st.link_button(v["name"], v["url"], use_container_width=True, key=f"vall_{v['id']}_{i}")
 
     st.markdown("#### 정책 전체 카탈로그")
     for i, p in enumerate(POLICIES):
@@ -619,6 +784,9 @@ def page_policies(company: dict) -> None:
         b1, b2 = st.columns(2)
         b1.link_button("신청·바로가기", p["apply_url"], use_container_width=True, key=f"pol_a_{i}")
         b2.link_button("상세 안내", p["info_url"], use_container_width=True, key=f"pol_i_{i}")
+
+    soft_card("완료", "다섯 스텝을 모두 봤어요. 필요하면 처음부터 다시 진행하거나 더보기에서 CSV·진단을 보완하세요.")
+    step_nav("견적비교", None, key_prefix="pol")
 
 
 def page_more(model_name: str, company: dict) -> None:
@@ -652,7 +820,7 @@ def page_more(model_name: str, company: dict) -> None:
                 "ax_level": kd.get("ax_level"),
             }
             st.success("불러왔어요. 과업지시서 화면으로 이동해 작성하세요.")
-            navigate("과업지시서")
+            navigate("과업지시서 작성")
 
         with st.expander("보완 진단(선택)"):
             profile = company_form(company, "diag")
@@ -725,21 +893,34 @@ def main() -> None:
     inject_styles()
     model_name, company = sidebar()
 
-    page = st.radio(
-        "메뉴",
-        PAGES,
-        horizontal=True,
-        label_visibility="collapsed",
+    # 상단: 5스텝 진행 표시 (완료 ✓ / 현재 강조)
+    current = st.session_state.get("page", STEPS[0])
+    if current not in PAGES:
+        current = STEPS[0]
+        st.session_state.page = current
+    render_stepper(list(STEPS), current, completed_steps())
+
+    # 클릭 이동: 메인 5스텝 + 보조 더보기
+    page = st.pills(
+        "진행 스텝",
+        options=list(PAGES),
+        default=current if current in PAGES else STEPS[0],
         key="page",
+        label_visibility="collapsed",
     )
+    if page is None:
+        page = current
+        st.session_state.page = page
 
     render_chat_panel(model_name, company, page)
 
-    if page == "기초체력":
+    if page == "기초체력보기":
         page_fitness()
-    elif page == "과업지시서":
+    elif page == "과업지시서 작성":
         page_work_order(model_name, company)
-    elif page == "견적 비교":
+    elif page == "업체 탐색":
+        page_vendors(company)
+    elif page == "견적비교":
         page_quotes(model_name, company)
     elif page == "정책연계":
         page_policies(company)

@@ -285,12 +285,42 @@ def recommend_vendors(
     *,
     company: dict[str, Any] | None = None,
     work_order: dict[str, Any] | None = None,
+    fitness: dict[str, Any] | None = None,
     limit: int = 8,
 ) -> list[dict[str, Any]]:
     text = _haystack(company, work_order)
+    # AX 적용 희망 영역·문제를 매칭 키워드에 강하게 반영
+    focus_bits = []
+    if fitness:
+        focus_bits.extend(fitness.get("ai_areas") or [])
+        focus_bits.extend(fitness.get("ai_problems") or [])
+        if fitness.get("industry"):
+            focus_bits.append(str(fitness["industry"]))
+    focus_text = " ".join(str(x) for x in focus_bits).lower()
+    text = f"{text} {focus_text}".strip()
+
+    area_boost = {
+        "품질관리": ("비전·품질검사",),
+        "공정/설비": ("예지보전", "예지·공정", "MES·ERP 연계", "제조 AI 플랫폼"),
+        "현장/작업": ("MES·ERP 연계", "예지보전", "제조 AI 플랫폼"),
+        "구매/자재": ("MES·ERP 연계", "수요예측"),
+        "물류": ("MES·ERP 연계", "수요예측"),
+        "재무/회계": ("문서·LLM", "업무자동화", "MES·ERP 연계"),
+        "영업/마케팅": ("문서·LLM", "업무자동화", "수요예측"),
+        "기획관리": ("문서·LLM", "업무자동화"),
+        "고객지원": ("문서·LLM", "업무자동화"),
+        "인사/총무": ("문서·LLM", "업무자동화"),
+        "기술개발": ("비전·품질검사", "제조 AI 플랫폼"),
+        "제품개발": ("비전·품질검사", "제조 AI 플랫폼"),
+        "연구기획": ("문서·LLM",),
+    }
+
     scored: list[tuple[int, dict[str, Any]]] = []
     for v in VENDORS:
         hit = sum(1 for kw in v.get("fit") or [] if kw.lower() in text)
+        for area in (fitness or {}).get("ai_areas") or []:
+            if v.get("category") in area_boost.get(area, ()):
+                hit += 2
         # soft boosts by industry
         industry = str((company or {}).get("industry") or "")
         if "자동차" in industry and "자동차" in " ".join(v.get("fit") or []):
