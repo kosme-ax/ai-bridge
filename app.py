@@ -41,9 +41,26 @@ def init_state() -> None:
     st.session_state.setdefault("last_title", "")
     st.session_state.setdefault("fitness", None)
     st.session_state.setdefault("page", "기초체력")
+    st.session_state.setdefault("more_choice", "CSV 검증")
     st.session_state.setdefault("chat_messages", [])
     settings = runtime_settings()
     st.session_state.setdefault("model_name", settings["default_model"])
+
+
+def navigate(page: str, *, more: str | None = None) -> None:
+    """위젯 key에 직접 쓰지 말고, 다음 런 시작 전에 적용되도록 예약."""
+    st.session_state["_nav_page"] = page
+    if more is not None:
+        st.session_state["_nav_more"] = more
+    st.rerun()
+
+
+def apply_pending_nav() -> None:
+    """radio(key=page/more_choice) 생성 전에만 호출."""
+    if "_nav_page" in st.session_state:
+        st.session_state.page = st.session_state.pop("_nav_page")
+    if "_nav_more" in st.session_state:
+        st.session_state.more_choice = st.session_state.pop("_nav_more")
 
 
 def sidebar() -> tuple[str, dict]:
@@ -250,12 +267,9 @@ def page_fitness() -> None:
     soft_card("다음 단계", "표준 CSV를 검증한 뒤 과업지시서를 작성하세요.")
     c1, c2 = st.columns(2)
     if c1.button("CSV 검증으로", use_container_width=True, key="go_csv"):
-        st.session_state.page = "더보기"
-        st.session_state.more_choice = "CSV 검증"
-        st.rerun()
+        navigate("더보기", more="CSV 검증")
     if c2.button("과업지시서로", type="primary", use_container_width=True, key="go_wo"):
-        st.session_state.page = "과업지시서"
-        st.rerun()
+        navigate("과업지시서")
 
 
 def page_work_order(model_name: str, company: dict) -> None:
@@ -398,8 +412,7 @@ def page_csv_validate() -> None:
         st.dataframe(report["preview"], use_container_width=True)
 
     if report["ok"] and st.button("과업지시서 작성으로", type="primary", use_container_width=True):
-        st.session_state.page = "과업지시서"
-        st.rerun()
+        navigate("과업지시서")
 
 
 def page_policies(company: dict) -> None:
@@ -457,8 +470,7 @@ def page_more(model_name: str, company: dict) -> None:
                 "ax_level": kd.get("ax_level"),
             }
             st.success("불러왔어요. 과업지시서 화면으로 이동해 작성하세요.")
-            st.session_state.page = "과업지시서"
-            st.rerun()
+            navigate("과업지시서")
 
         with st.expander("보완 진단(선택)"):
             profile = company_form(company, "diag")
@@ -527,6 +539,7 @@ def page_more(model_name: str, company: dict) -> None:
 
 def main() -> None:
     init_state()
+    apply_pending_nav()
     inject_styles()
     model_name, company = sidebar()
 
