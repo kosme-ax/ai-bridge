@@ -19,7 +19,14 @@ from src.csv_validate import (
 )
 from src.docs import load_sample, read_upload
 from src.chatbot import build_context, reply_chat
-from src.fitness import FITNESS_QUESTIONS, score_fitness
+from src.fitness import (
+    QUESTION_BANK,
+    adapt_question_with_ai,
+    fitness_from_kdoctor,
+    question_at,
+    score_fitness,
+    update_difficulty,
+)
 from src.policies import POLICIES, recommend_policies
 from src.reports import to_docx_bytes, to_pdf_bytes
 from src.sample_data import COMPANIES, sample_files
@@ -43,6 +50,12 @@ def init_state() -> None:
     st.session_state.setdefault("page", "기초체력")
     st.session_state.setdefault("more_choice", "CSV 검증")
     st.session_state.setdefault("chat_messages", [])
+    st.session_state.setdefault("fit_path", None)  # None | kdoctor | quiz
+    st.session_state.setdefault("fit_step", 0)
+    st.session_state.setdefault("fit_difficulty", "normal")
+    st.session_state.setdefault("fit_answers", {})
+    st.session_state.setdefault("fit_answer_log", [])
+    st.session_state.setdefault("fit_current_q", None)
     settings = runtime_settings()
     st.session_state.setdefault("model_name", settings["default_model"])
 
@@ -233,43 +246,183 @@ def render_policy_recs(company: dict, *, context: str, key_prefix: str) -> None:
         st.write("")
 
 
-def page_fitness() -> None:
-    page_header(
-        "고도화 ①",
-        "데이터 기초 체력을<br>먼저 확인해요",
-        "거창한 AI 평가가 아닙니다. 기록·수집 습관 8문항만 체크하세요.",
-    )
+def _reset_quiz_state() -> None:
+    st.session_state.fit_step = 0
+    st.session_state.fit_difficulty = "normal"
+    st.session_state.fit_answers = {}
+    st.session_state.fit_answer_log = []
+    st.session_state.fit_current_q = None
 
-    answers: dict[str, int] = {}
-    for q in FITNESS_QUESTIONS:
-        labels = [o[0] for o in q["options"]]
-        scores = {o[0]: o[1] for o in q["options"]}
-        choice = st.radio(q["text"], labels, horizontal=True, key=f"fit_{q['id']}")
-        answers[q["id"]] = scores[choice]
 
-    st.write("")
-    if st.button("결과 보기", type="primary", use_container_width=True, key="fit_run"):
-        fit = score_fitness(answers)
-        st.session_state.fitness = fit
-
+def _render_fitness_result(company: dict) -> None:
     fit = st.session_state.get("fitness")
     if not fit:
         return
-
+    src = "K-Doctor 연동" if fit.get("source") == "kdoctor" else "적응형 문항"
     st.metric("기초체력", f"{fit['label']}  {fit['total']}/{fit['max_score']}")
+    st.caption(f"산출 경로: {src}")
     st.write(fit["tip"])
+    if fit.get("kdoctor_summary"):
+        soft_card("K-Doctor 요약", fit["kdoctor_summary"])
+    if fit.get("priority_tasks"):
+        soft_card("우선 과제", " · ".join(fit["priority_tasks"]))
     render_education(fit)
-    # company from session for policy match
-    company = COMPANIES[st.session_state.company_key]
     render_policy_recs(company, context="fitness", key_prefix="fit")
-
     st.write("")
-    soft_card("다음 단계", "표준 CSV를 검증한 뒤 과업지시서를 작성하세요.")
-    c1, c2 = st.columns(2)
-    if c1.button("CSV 검증으로", use_container_width=True, key="go_csv"):
+    soft_card("다음 단계", "표준 CSV를 검증하거나 과업지시서를 작성하세요.")
+    c1, c2, c3 = st.columns(3)
+    if c1.button("처음부터", use_container_width=True, key="fit_restart"):
+        st.session_state.fitness = None
+        st.session_state.fit_path = None
+        _reset_quiz_state()
+        st.rerun()
+    if c2.button("CSV 검증으로", use_container_width=True, key="go_csv"):
         navigate("더보기", more="CSV 검증")
-    if c2.button("과업지시서로", type="primary", use_container_width=True, key="go_wo"):
+    if c3.button("과업지시서로", type="primary", use_container_width=True, key="go_wo"):
         navigate("과업지시서")
+
+
+def page_fitness() -> None:
+    company = COMPANIES[st.session_state.company_key]
+    model_name = st.session_state.model_name
+
+    page_header(
+        "고도화 ①",
+        "기초 체력,<br>진단부터 확인할게요",
+        "K-Doctor를 했으면 데이터를 불러오고, 아니면 수준에 맞춰 문항이 달라집니다.",
+    )
+
+    if st.session_state.get("fitness"):
+        _render_fitness_result(company)
+        return
+
+    # --- Gate: K-Doctor 여부 ---
+    if st.session_state.fit_path is None:
+        soft_card(
+            "먼저 확인할게요",
+            "중진공 K-Doctor(AI진단)를 이미 하셨나요? 하셨다면 합성 연동 데이터로 불러옵니다.",
+        )
+        a1, a2 = st.columns(2)
+        if a1.button("네, 진단했어요", type="primary", use_container_width=True, key="fit_kd_yes"):
+            st.session_state.fit_path = "kdoctor"
+            st.rerun()
+        if a2.button("아직 안 했어요", use_container_width=True, key="fit_kd_no"):
+            st.session_state.fit_path = "quiz"
+            _reset_quiz_state()
+            st.rerun()
+        st.link_button(
+            "K-Doctor 바로가기",
+            "https://kdoctor.kosmes.or.kr/main.do?v=f",
+            use_container_width=True,
+        )
+        return
+
+    # --- Path A: K-Doctor pull (test data) ---
+    if st.session_state.fit_path == "kdoctor":
+        kd = company.get("kdoctor") or {}
+        soft_card(
+            f"연동 준비 · {kd.get('diagnosis_id', '-')}",
+            f"{company['name']} / AX수준 {kd.get('ax_level')} / {kd.get('status')}",
+        )
+        st.write(kd.get("summary", ""))
+        if kd.get("priority_tasks"):
+            st.markdown("**우선 과제**")
+            for t in kd["priority_tasks"]:
+                st.write(f"- {t}")
+        st.caption(
+            f"시연용 테스트 데이터입니다. (pulled_at: {kd.get('pulled_at', '-')}) "
+            "실 API 연동 전 단계예요."
+        )
+        b1, b2 = st.columns(2)
+        if b1.button("뒤로", use_container_width=True, key="fit_kd_back"):
+            st.session_state.fit_path = None
+            st.rerun()
+        if b2.button("이 진단으로 기초체력 산출", type="primary", use_container_width=True, key="fit_kd_pull"):
+            st.session_state.last_result = {
+                "summary": kd.get("summary"),
+                "source": "kdoctor",
+                "diagnosis_id": kd.get("diagnosis_id"),
+                "priority_tasks": kd.get("priority_tasks"),
+                "ax_level": kd.get("ax_level"),
+            }
+            st.session_state.last_title = "K-Doctor연동"
+            st.session_state.fitness = fitness_from_kdoctor(kd, company)
+            st.rerun()
+        return
+
+    # --- Path B: adaptive quiz (one question at a time) ---
+    step = int(st.session_state.fit_step)
+    total = len(QUESTION_BANK)
+    if step >= total:
+        # safety
+        qs = [question_at(i, "normal") for i in range(total)]
+        st.session_state.fitness = score_fitness(st.session_state.fit_answers, questions=qs, source="quiz")
+        st.rerun()
+        return
+
+    if st.session_state.fit_current_q is None:
+        q = question_at(step, st.session_state.fit_difficulty)
+        q = adapt_question_with_ai(
+            q,
+            previous_answers=st.session_state.fit_answer_log,
+            company_name=company.get("name", ""),
+            model_name=model_name,
+            chat_fn=reply_chat,
+        )
+        st.session_state.fit_current_q = q
+    else:
+        q = st.session_state.fit_current_q
+
+    st.progress((step) / total, text=f"문항 {step + 1} / {total} · 난이도 {q['difficulty']}")
+    soft_card(q["topic"], "직전 답에 맞춰 질문 수준을 조정했어요." if step else "첫 문항부터 시작해 볼게요.")
+    if q.get("ai_rewritten"):
+        st.caption("AI가 문항 문구를 다듬었습니다.")
+
+    labels = [o[0] for o in q["options"]]
+    scores = {o[0]: o[1] for o in q["options"]}
+    choice = st.radio(q["text"], labels, horizontal=True, key=f"fit_step_{step}_{q['difficulty']}")
+
+    c1, c2 = st.columns(2)
+    if c1.button("이전 경로로", use_container_width=True, key="fit_quiz_back"):
+        st.session_state.fit_path = None
+        _reset_quiz_state()
+        st.rerun()
+    if c2.button("다음", type="primary", use_container_width=True, key="fit_quiz_next"):
+        score = scores[choice]
+        st.session_state.fit_answers[q["id"]] = score
+        st.session_state.fit_answer_log.append(
+            {
+                "id": q["id"],
+                "topic": q["topic"],
+                "difficulty": q["difficulty"],
+                "choice_label": choice,
+                "score": score,
+                "text": q["text"],
+            }
+        )
+        st.session_state.fit_difficulty = update_difficulty(st.session_state.fit_difficulty, score)
+        st.session_state.fit_step = step + 1
+        st.session_state.fit_current_q = None
+        if st.session_state.fit_step >= total:
+            used = [
+                {
+                    "id": row["id"],
+                    "text": row["text"],
+                    "options": next(
+                        b["levels"][row["difficulty"]]["options"]
+                        for b in QUESTION_BANK
+                        if b["id"] == row["id"]
+                    ),
+                }
+                for row in st.session_state.fit_answer_log
+            ]
+            st.session_state.fitness = score_fitness(
+                st.session_state.fit_answers,
+                questions=used,
+                source="quiz",
+                extra={"answer_log": st.session_state.fit_answer_log},
+            )
+        st.rerun()
 
 
 def page_work_order(model_name: str, company: dict) -> None:

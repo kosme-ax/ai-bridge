@@ -22,6 +22,7 @@ COMPANIES = {
             "diagnosis_id": "KD-SIM-HB-2025-001",
             "status": "진단완료",
             "ax_level": "중간",
+            "pulled_at": "2025-11-02T10:20:00+09:00",
             "summary": (
                 "내부역량·외부환경 진단 결과, 생산-영업 데이터 단절과 검사 숙련 의존이 "
                 "성장 저해 요인으로 도출됨. AX 우선과제는 품질검사 보조와 월마감 자동화."
@@ -31,6 +32,17 @@ COMPANIES = {
                 "ERP-현장 데이터 연계 과업 명세",
                 "월마감 자동화 PoC 과업지시서 작성",
             ],
+            # 기초체력 매핑용 합성 점수 (0~2)
+            "data_fitness": {
+                "digital_record": 2,
+                "customer_data": 1,
+                "shopfloor_data": 1,
+                "template_std": 1,
+                "data_plan": 2,
+                "naming": 1,
+                "ax_mindset": 2,
+                "machine_readable": 1,
+            },
         },
     },
     "푸른식품": {
@@ -46,6 +58,7 @@ COMPANIES = {
             "diagnosis_id": "KD-SIM-PR-2025-014",
             "status": "진단완료",
             "ax_level": "초기",
+            "pulled_at": "2025-10-18T14:05:00+09:00",
             "summary": (
                 "라벨·재고·거래처 단가의 수기 비중이 높아 내부 효율 저하. "
                 "AX 지원은 라벨 자동화와 정산 데이터 표준화 과업이 우선."
@@ -55,6 +68,16 @@ COMPANIES = {
                 "재고 실사 오차 개선 과업지시서",
                 "거래처 단가표 통합 RFP/견적 비교",
             ],
+            "data_fitness": {
+                "digital_record": 0,
+                "customer_data": 1,
+                "shopfloor_data": 0,
+                "template_std": 0,
+                "data_plan": 1,
+                "naming": 0,
+                "ax_mindset": 1,
+                "machine_readable": 0,
+            },
         },
     },
 }
