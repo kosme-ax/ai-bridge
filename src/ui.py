@@ -286,12 +286,13 @@ def render_stepper(steps: list[str], current: str, done: set[str] | None = None)
         )
 
 
-def page_header(eyebrow: str, title: str, sub: str) -> None:
+def page_header(eyebrow: str, title: str, sub: str = "") -> None:
+    sub_html = f'<div class="toss-sub">{sub}</div>' if sub else ""
     st.markdown(
         f"""
 <div class="toss-eyebrow">{eyebrow}</div>
 <div class="toss-title">{title}</div>
-<div class="toss-sub">{sub}</div>
+{sub_html}
 """,
         unsafe_allow_html=True,
     )
