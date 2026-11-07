@@ -111,6 +111,38 @@ div[data-baseweb="select"] > div {
   font-size: 0.78rem;
   text-align: center;
 }
+.toss-policy {
+  background: #FFFFFF;
+  border: 1px solid #E5E8EB;
+  border-radius: 20px;
+  padding: 1.25rem 1.2rem;
+  margin: 0 0 0.85rem;
+}
+.toss-policy .badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #3182F6;
+  margin-bottom: 0.35rem;
+}
+.toss-policy h4 {
+  margin: 0 0 0.4rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #191F28;
+}
+.toss-policy p {
+  margin: 0 0 0.55rem;
+  color: #4E5968;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.toss-policy .meta {
+  color: #8B95A1;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  margin: 0;
+}
 </style>
 """
 
@@ -136,6 +168,27 @@ def soft_card(title: str, body: str) -> None:
 <div class="toss-card">
   <h4>{title}</h4>
   <p>{body}</p>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def policy_card(policy: dict) -> None:
+    why = policy.get("why") or ""
+    st.markdown(
+        f"""
+<div class="toss-policy">
+  <div class="badge">{policy.get("category", "정책")} · {policy.get("org", "")}</div>
+  <h4>{policy.get("name", "")}</h4>
+  <p>{policy.get("summary", "")}</p>
+  <p class="meta">
+    <strong>추천 이유</strong> {why}<br/>
+    <strong>일정</strong> {policy.get("period", "-")}<br/>
+    <strong>신청</strong> {policy.get("apply", "-")}<br/>
+    <strong>담당</strong> {policy.get("owner", "-")}<br/>
+    <strong>문의</strong> {policy.get("contact", "-")}
+  </p>
 </div>
 """,
         unsafe_allow_html=True,

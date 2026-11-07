@@ -19,9 +19,10 @@ from src.csv_validate import (
 )
 from src.docs import load_sample, read_upload
 from src.fitness import FITNESS_QUESTIONS, score_fitness
+from src.policies import POLICIES, recommend_policies
 from src.reports import to_docx_bytes, to_pdf_bytes
 from src.sample_data import COMPANIES, sample_files
-from src.ui import inject_styles, page_header, render_footer, soft_card
+from src.ui import inject_styles, page_header, policy_card, render_footer, soft_card
 
 st.set_page_config(
     page_title="AI-Bridge",
@@ -30,7 +31,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-PAGES = ("기초체력", "과업지시서", "견적 비교", "더보기")
+PAGES = ("기초체력", "과업지시서", "견적 비교", "정책연계", "더보기")
 
 
 def init_state() -> None:
@@ -148,6 +149,29 @@ def render_education(fit: dict) -> None:
         st.link_button(link["title"], link["url"], use_container_width=True)
 
 
+def render_policy_recs(company: dict, *, context: str, key_prefix: str) -> None:
+    fit = st.session_state.get("fitness")
+    recs = recommend_policies(fitness=fit, company=company, context=context, limit=3)
+    st.markdown("#### 중진공 정책 연계 추천")
+    st.caption("결과 기준으로 골라 둔 안내입니다. 일정·조건은 공식 공고를 확인하세요.")
+    for i, p in enumerate(recs):
+        policy_card(p)
+        b1, b2 = st.columns(2)
+        b1.link_button(
+            "신청·바로가기",
+            p["apply_url"],
+            use_container_width=True,
+            key=f"{key_prefix}_apply_{p['id']}_{i}",
+        )
+        b2.link_button(
+            "상세 안내",
+            p["info_url"],
+            use_container_width=True,
+            key=f"{key_prefix}_info_{p['id']}_{i}",
+        )
+        st.write("")
+
+
 def page_fitness() -> None:
     page_header(
         "고도화 ①",
@@ -174,6 +198,9 @@ def page_fitness() -> None:
     st.metric("기초체력", f"{fit['label']}  {fit['total']}/{fit['max_score']}")
     st.write(fit["tip"])
     render_education(fit)
+    # company from session for policy match
+    company = COMPANIES[st.session_state.company_key]
+    render_policy_recs(company, context="fitness", key_prefix="fit")
 
     st.write("")
     soft_card("다음 단계", "표준 CSV를 검증한 뒤 과업지시서를 작성하세요.")
@@ -219,6 +246,9 @@ def page_work_order(model_name: str, company: dict) -> None:
                 },
             )
         show_result("AX과업지시서", result)
+
+    if st.session_state.get("last_title") == "AX과업지시서":
+        render_policy_recs(company, context="work_order", key_prefix="wo")
 
 
 def page_quotes(model_name: str, company: dict) -> None:
@@ -266,6 +296,9 @@ def page_quotes(model_name: str, company: dict) -> None:
             with st.spinner("비교 중…"):
                 result = compare_quotations(model_name, company, quote_text)
             show_result("견적비교", result)
+
+    if st.session_state.get("last_title") == "견적비교":
+        render_policy_recs(company, context="quote", key_prefix="qt")
 
 
 def page_csv_validate() -> None:
@@ -323,6 +356,30 @@ def page_csv_validate() -> None:
     if report["ok"] and st.button("과업지시서 작성으로", type="primary", use_container_width=True):
         st.session_state.page = "과업지시서"
         st.rerun()
+
+
+def page_policies(company: dict) -> None:
+    page_header(
+        "정책 킥",
+        "결과에 맞는<br>중진공 사업을 이어가요",
+        "기술자금·스마트화 융자, 지역주도형 AI 대전환 등 개요·일정·신청·담당을 안내합니다.",
+    )
+    fit = st.session_state.get("fitness")
+    if fit:
+        soft_card(f"현재 기초체력 · {fit['label']}", fit["tip"])
+    else:
+        soft_card("기초체력 미실시", "기초체력을 먼저 하면 추천이 더 정확해집니다.")
+
+    render_policy_recs(company, context="work_order", key_prefix="pol_top")
+
+    st.markdown("#### 전체 카탈로그")
+    for i, p in enumerate(POLICIES):
+        item = dict(p)
+        item["why"] = "카탈로그 — 필요 시 직접 확인하세요."
+        policy_card(item)
+        b1, b2 = st.columns(2)
+        b1.link_button("신청·바로가기", p["apply_url"], use_container_width=True, key=f"pol_a_{i}")
+        b2.link_button("상세 안내", p["info_url"], use_container_width=True, key=f"pol_i_{i}")
 
 
 def page_more(model_name: str, company: dict) -> None:
@@ -443,6 +500,8 @@ def main() -> None:
         page_work_order(model_name, company)
     elif page == "견적 비교":
         page_quotes(model_name, company)
+    elif page == "정책연계":
+        page_policies(company)
     else:
         page_more(model_name, company)
 
