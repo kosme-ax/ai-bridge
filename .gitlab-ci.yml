@@ -1,0 +1,35 @@
+stages:
+  - test
+  - package
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  paths:
+    - .cache/pip
+    - .venv/
+
+test:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install -r requirements.txt
+    - python -c "from src.config import MODELS; assert 'Solar' in MODELS and 'Gemini' in MODELS"
+    - python -c "from src.llm import generate_json; r=generate_json('Solar','diagnosis','키워드: diagnosis\n테스트', '한빛'); assert 'summary' in r"
+  rules:
+    - if: $CI_PIPELINE_SOURCE
+
+# GitLab Pages는 Streamlit에 부적합. 이미지 빌드만 검증.
+docker-build:
+  stage: package
+  image: docker:24
+  services:
+    - docker:24-dind
+  script:
+    - docker build -t ai-bridge:$CI_COMMIT_SHORT_SHA .
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual

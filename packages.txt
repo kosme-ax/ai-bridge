@@ -1,0 +1,10 @@
+# Streamlit Community Cloud 가 참고하는 의존성 목록 (requirements.txt와 동일 계열)
+streamlit
+httpx
+pydantic
+python-dotenv
+pypdf
+python-docx
+openpyxl
+pandas
+reportlab
