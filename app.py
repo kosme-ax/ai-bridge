@@ -30,7 +30,8 @@ from src.fitness import (
 from src.policies import POLICIES, recommend_policies
 from src.reports import to_docx_bytes, to_pdf_bytes
 from src.sample_data import COMPANIES, sample_files
-from src.ui import inject_styles, page_header, policy_card, render_footer, soft_card
+from src.ui import inject_styles, page_header, policy_card, render_footer, soft_card, vendor_card
+from src.vendors import VENDORS, recommend_vendors
 
 st.set_page_config(
     page_title="AI-Bridge",
@@ -221,6 +222,24 @@ def render_education(fit: dict) -> None:
     soft_card("맞춤 교육 안내", fit["tip"])
     for link in fit.get("education") or []:
         st.link_button(link["title"], link["url"], use_container_width=True)
+
+
+def render_vendor_recs(company: dict, *, key_prefix: str) -> None:
+    wo = st.session_state.get("last_result") if st.session_state.get("last_title") == "AX과업지시서" else None
+    recs = recommend_vendors(company=company, work_order=wo, limit=8)
+    st.markdown("#### AI 공급사 추천")
+    st.caption(
+        f"과업·진단 키워드로 {len(VENDORS)}개 카탈로그 중 골라 둔 참고 목록입니다. "
+        "계약·단가 보증이 아니며 AI바우처 Pool·각사 공고를 확인하세요."
+    )
+    for i, v in enumerate(recs):
+        vendor_card(v)
+        st.link_button(
+            f"{v['name']} 바로가기",
+            v["url"],
+            use_container_width=True,
+            key=f"{key_prefix}_vendor_{v['id']}_{i}",
+        )
 
 
 def render_policy_recs(company: dict, *, context: str, key_prefix: str) -> None:
@@ -459,6 +478,7 @@ def page_work_order(model_name: str, company: dict) -> None:
         show_result("AX과업지시서", result)
 
     if st.session_state.get("last_title") == "AX과업지시서":
+        render_vendor_recs(company, key_prefix="wo")
         render_policy_recs(company, context="work_order", key_prefix="wo")
 
 
@@ -581,8 +601,17 @@ def page_policies(company: dict) -> None:
         soft_card("기초체력 미실시", "기초체력을 먼저 하면 추천이 더 정확해집니다.")
 
     render_policy_recs(company, context="work_order", key_prefix="pol_top")
+    render_vendor_recs(company, key_prefix="pol_v")
 
-    st.markdown("#### 전체 카탈로그")
+    with st.expander(f"AI 공급사 전체 목록 ({len(VENDORS)}개)"):
+        for i, v in enumerate(VENDORS):
+            item = dict(v)
+            item["match_score"] = 0
+            item["why"] = "카탈로그"
+            vendor_card(item)
+            st.link_button(v["name"], v["url"], use_container_width=True, key=f"vall_{v['id']}_{i}")
+
+    st.markdown("#### 정책 전체 카탈로그")
     for i, p in enumerate(POLICIES):
         item = dict(p)
         item["why"] = "카탈로그 — 필요 시 직접 확인하세요."

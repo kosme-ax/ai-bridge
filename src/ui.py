@@ -174,6 +174,24 @@ def soft_card(title: str, body: str) -> None:
     )
 
 
+def vendor_card(vendor: dict) -> None:
+    st.markdown(
+        f"""
+<div class="toss-policy">
+  <div class="badge">{vendor.get("category", "공급사")} · 매칭 {vendor.get("match_score", 0)}</div>
+  <h4>{vendor.get("name", "")}</h4>
+  <p>{vendor.get("summary", "")}</p>
+  <p class="meta">
+    <strong>추천 이유</strong> {vendor.get("why", "")}<br/>
+    <strong>메모</strong> {vendor.get("note", "-")}<br/>
+    <strong>문의</strong> {vendor.get("contact", "-")}
+  </p>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
 def policy_card(policy: dict) -> None:
     why = policy.get("why") or ""
     st.markdown(
