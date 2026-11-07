@@ -36,15 +36,19 @@ streamlit run app.py
 
 ### Streamlit Community Cloud (권장)
 
-1. 이 저장소를 Streamlit Cloud에 연결 (`app.py`)
-2. Secrets에 API 키 등록 (`.streamlit/secrets.toml.example` 참고)
+- 앱 URL: https://sme-ai-helper.streamlit.app
+- 진입점: `streamlit_app.py` (또는 `app.py`)
+- GitHub: https://github.com/kosme-ax/ai-bridge
+- Secrets에 `SOLAR_API_KEY` 등 등록 (`.streamlit/secrets.toml.example` 참고)
+
+도메인에 밑줄(`_`)은 쓸 수 없어 `sme_ai_helper` → `sme-ai-helper` 로 배포합니다.
 
 ### GitLab
 
-- 코드 호스팅: 이 프로젝트
+- 코드 호스팅: https://gitlab.aigov.go.kr/kosme2512042/sme_ai_helper
 - CI: SAST + Secret Detection + 앱 스모크 테스트 (`.gitlab-ci.yml`)
 - **GitLab Pages는 정적 호스팅이라 Streamlit에 부적합**
-- 선택지: Streamlit Cloud, 또는 Docker 이미지 수동 배포
+- 실행 URL은 Streamlit Cloud를 사용합니다.
 
 ## 보안 원칙 (대회)
 
