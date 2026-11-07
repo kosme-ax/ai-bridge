@@ -18,7 +18,6 @@ from src.csv_validate import (
     validate_quote_csv,
 )
 from src.docs import load_sample, read_upload
-from src.chatbot import build_context, reply_chat
 from src.fitness import (
     AI_AREAS,
     INDUSTRIES,
@@ -26,7 +25,7 @@ from src.fitness import (
     KDOCTOR_LOGIN,
     LIKERT_QUESTIONS,
     TOTAL_QUIZ_STEPS,
-    fitness_from_kdoctor,
+    fitness_from_report,
     likert_at,
     problems_for_areas,
     score_fitness,
@@ -34,15 +33,7 @@ from src.fitness import (
 from src.policies import POLICIES, recommend_policies
 from src.reports import to_docx_bytes, to_pdf_bytes
 from src.sample_data import COMPANIES, sample_files
-from src.ui import (
-    inject_styles,
-    page_header,
-    policy_card,
-    render_footer,
-    render_stepper,
-    soft_card,
-    vendor_card,
-)
+from src.ui import inject_styles, page_header, policy_card, render_footer, soft_card, vendor_card
 from src.vendors import VENDORS, recommend_vendors
 
 st.set_page_config(
@@ -77,8 +68,9 @@ def init_state() -> None:
     st.session_state.setdefault("fitness", None)
     st.session_state.setdefault("page", "기초체력보기")
     st.session_state.setdefault("more_choice", "CSV 검증")
-    st.session_state.setdefault("chat_messages", [])
-    st.session_state.setdefault("fit_path", None)  # None | kdoctor | quiz
+    if st.session_state.get("more_choice") == "K-Doctor 연동":
+        st.session_state.more_choice = "보완 진단"
+    st.session_state.setdefault("fit_path", None)  # None | report | quiz
     st.session_state.setdefault("fit_step", 0)  # 0 industry, 1 areas, 2 problems, 3+ likert
     st.session_state.setdefault("fit_answers", {})
     st.session_state.setdefault("fit_answer_log", [])
@@ -91,21 +83,6 @@ def init_state() -> None:
     cur = st.session_state.get("page")
     if cur in _PAGE_ALIASES:
         st.session_state.page = _PAGE_ALIASES[cur]
-
-
-def completed_steps() -> set[str]:
-    done: set[str] = set()
-    if st.session_state.get("fitness"):
-        done.add("기초체력보기")
-    if st.session_state.get("work_order_done") or st.session_state.get("last_title") == "AX과업지시서":
-        done.add("과업지시서 작성")
-    if st.session_state.get("vendors_viewed"):
-        done.add("업체 탐색")
-    if st.session_state.get("quotes_done") or st.session_state.get("last_title") == "견적비교":
-        done.add("견적비교")
-    if st.session_state.get("policies_viewed"):
-        done.add("정책연계")
-    return done
 
 
 def step_nav(prev: str | None, next_: str | None, *, key_prefix: str) -> None:
@@ -237,50 +214,6 @@ def show_result(title: str, result: dict) -> None:
     )
 
 
-def render_chat_panel(model_name: str, company: dict, page: str) -> None:
-    with st.expander("AI 상담 · 스텝 안내", expanded=False):
-        st.caption("①기초체력 → ②과업지시서 → ③업체탐색 → ④견적비교 → ⑤정책연계")
-        for msg in st.session_state.chat_messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-
-        c1, c2, c3, c4, c5 = st.columns(5)
-        quick = None
-        if c1.button("체력", use_container_width=True, key="chat_q_fit"):
-            quick = "기초체력 결과가 어떻게 나왔고, 다음에 뭘 하면 좋을까요?"
-        if c2.button("과업", use_container_width=True, key="chat_q_wo"):
-            quick = "과업지시서에 넣을 우선 과업을 짧게 잡아 주세요."
-        if c3.button("업체", use_container_width=True, key="chat_q_vd"):
-            quick = "지금 과업에 맞는 AI 공급사를 추천해 주세요."
-        if c4.button("견적", use_container_width=True, key="chat_q_qt"):
-            quick = "견적 비교할 때 어떤 항목을 보면 되나요?"
-        if c5.button("정책", use_container_width=True, key="chat_q_pol"):
-            quick = "지금 기업에 맞는 중진공 기술자금이나 지역 AI 대전환을 알려 주세요."
-
-        prompt = st.chat_input("궁금한 점을 입력하세요")
-        user_text = quick or prompt
-        if not user_text:
-            return
-
-        st.session_state.chat_messages.append({"role": "user", "content": user_text})
-        context = build_context(
-            company=company,
-            fitness=st.session_state.get("fitness"),
-            last_title=st.session_state.get("last_title") or "",
-            last_result=st.session_state.get("last_result"),
-            page=page,
-        )
-        history = [
-            {"role": m["role"], "content": m["content"]}
-            for m in st.session_state.chat_messages[:-1]
-            if m["role"] in ("user", "assistant")
-        ]
-        with st.spinner("답변 작성 중…"):
-            answer = reply_chat(model_name, history, user_text, context)
-        st.session_state.chat_messages.append({"role": "assistant", "content": answer})
-        st.rerun()
-
-
 def render_education(fit: dict) -> None:
     if fit["level"] == "high":
         return
@@ -363,7 +296,11 @@ def _render_fitness_result(company: dict) -> None:
     fit = st.session_state.get("fitness")
     if not fit:
         return
-    src = "K-Doctor 연동" if fit.get("source") == "kdoctor" else "AX 자가진단형 체크"
+    src = {
+        "report": "보고서 업로드",
+        "kdoctor": "보고서 업로드",
+        "quiz": "AX 자가진단형 체크",
+    }.get(str(fit.get("source")), "체크")
     st.metric("기초체력", f"{fit['label']}  {fit['total']}/{fit['max_score']}")
     st.caption(f"산출 경로: {src}")
     areas = fit.get("ai_areas") or []
@@ -378,7 +315,7 @@ def _render_fitness_result(company: dict) -> None:
         soft_card("해결하고 싶은 문제", " · ".join(problems))
     st.write(fit["tip"])
     if fit.get("kdoctor_summary"):
-        soft_card("K-Doctor 요약", fit["kdoctor_summary"])
+        soft_card("진단 보고서 요약", fit["kdoctor_summary"])
     if fit.get("priority_tasks") and not problems:
         soft_card("우선 과제", " · ".join(fit["priority_tasks"]))
     render_education(fit)
@@ -508,22 +445,22 @@ def page_fitness() -> None:
     page_header(
         "STEP 1",
         "어디에 AI를<br>쓰고 싶은가요?",
-        "K-Doctor AX 자가진단처럼, 적용 희망 영역부터 고른 뒤 사업·데이터·운영 준비를 확인합니다.",
+        "K-Doctor AX 자가진단 결과 보고서를 올리거나, 같은 흐름으로 여기서 바로 체크합니다.",
     )
 
     if st.session_state.get("fitness"):
         _render_fitness_result(company)
         return
 
-    # --- Gate: K-Doctor 여부 ---
+    # --- Gate ---
     if st.session_state.fit_path is None:
         soft_card(
             "먼저 확인할게요",
-            "중진공 K-Doctor AX 자가진단을 이미 하셨나요? 하셨다면 연동 데이터로 불러옵니다.",
+            "중진공 K-Doctor AX 자가진단을 이미 하셨나요? 하셨다면 결과 보고서를 업로드하세요.",
         )
         a1, a2 = st.columns(2)
-        if a1.button("네, 진단했어요", type="primary", use_container_width=True, key="fit_kd_yes"):
-            st.session_state.fit_path = "kdoctor"
+        if a1.button("네, 보고서 올릴게요", type="primary", use_container_width=True, key="fit_kd_yes"):
+            st.session_state.fit_path = "report"
             st.rerun()
         if a2.button("아직 안 했어요 · 여기서 체크", use_container_width=True, key="fit_kd_no"):
             st.session_state.fit_path = "quiz"
@@ -534,40 +471,68 @@ def page_fitness() -> None:
         b2.link_button("K-Doctor 로그인", KDOCTOR_LOGIN, use_container_width=True)
         return
 
-    # --- Path A: K-Doctor pull (test data) ---
-    if st.session_state.fit_path == "kdoctor":
-        kd = company.get("kdoctor") or {}
+    # --- Path A: 보고서 업로드 ---
+    if st.session_state.fit_path == "report":
         soft_card(
-            f"연동 준비 · {kd.get('diagnosis_id', '-')}",
-            f"{company['name']} / AX수준 {kd.get('ax_level')} / {kd.get('status')}",
+            "결과 보고서 업로드",
+            "K-Doctor에서 받은 AX 자가진단 결과(텍스트·PDF·DOCX)를 올리면 적용 영역·과제를 읽어 기초체력을 산출합니다.",
         )
-        st.write(kd.get("summary", ""))
-        if kd.get("ai_areas"):
-            soft_card("AI 적용 희망 영역", " · ".join(kd["ai_areas"]))
-        if kd.get("priority_tasks"):
-            st.markdown("**우선 과제**")
-            for t in kd["priority_tasks"]:
-                st.write(f"- {t}")
-        st.caption(
-            f"시연용 테스트 데이터입니다. (pulled_at: {kd.get('pulled_at', '-')}) "
-            "실 API 연동 전 단계예요."
-        )
+        sample_path = sample_files()["AX 자가진단 보고서"]
+        if sample_path.exists():
+            st.download_button(
+                "시연용 예시 보고서 받기",
+                data=sample_path.read_bytes(),
+                file_name=sample_path.name,
+                mime="text/plain",
+                use_container_width=True,
+                key="dl_ax_report_sample",
+            )
+        use_sample = st.toggle("샘플 보고서 사용 (심사 시연)", value=True, key="fit_report_sample")
+        report_text = ""
+        report_name = ""
+        if use_sample and sample_path.exists():
+            report_text = load_sample(sample_path)
+            report_name = sample_path.name
+            soft_card("샘플", report_name)
+            with st.expander("미리보기"):
+                st.text(report_text[:1500])
+        else:
+            uploaded = st.file_uploader(
+                "AX 자가진단 결과 보고서",
+                type=["txt", "md", "pdf", "docx"],
+                key="fit_report_up",
+            )
+            if uploaded:
+                report_name = uploaded.name
+                report_text = read_upload(uploaded.name, uploaded.getvalue())
+                soft_card("업로드됨", report_name)
+
         b1, b2 = st.columns(2)
         if b1.button("뒤로", use_container_width=True, key="fit_kd_back"):
             st.session_state.fit_path = None
             st.rerun()
-        if b2.button("이 진단으로 기초체력 산출", type="primary", use_container_width=True, key="fit_kd_pull"):
-            st.session_state.last_result = {
-                "summary": kd.get("summary"),
-                "source": "kdoctor",
-                "diagnosis_id": kd.get("diagnosis_id"),
-                "priority_tasks": kd.get("priority_tasks"),
-                "ai_areas": kd.get("ai_areas"),
-                "ax_level": kd.get("ax_level"),
-            }
-            st.session_state.last_title = "K-Doctor연동"
-            st.session_state.fitness = fitness_from_kdoctor(kd, company)
-            st.rerun()
+        if b2.button("보고서로 기초체력 산출", type="primary", use_container_width=True, key="fit_report_run"):
+            if not report_text.strip():
+                st.warning("보고서를 올리거나 샘플을 켜 주세요.")
+            else:
+                fit = fitness_from_report(report_text, company)
+                st.session_state.last_result = {
+                    "summary": fit.get("kdoctor_summary"),
+                    "source": "report",
+                    "diagnosis_id": fit.get("kdoctor_id"),
+                    "priority_tasks": fit.get("priority_tasks"),
+                    "ai_areas": fit.get("ai_areas"),
+                    "filename": report_name,
+                }
+                st.session_state.last_title = "AX보고서"
+                st.session_state.fitness = fit
+                st.rerun()
+        return
+
+    # 구 세션값 호환
+    if st.session_state.fit_path == "kdoctor":
+        st.session_state.fit_path = "report"
+        st.rerun()
         return
 
     # --- Path B: AX 자가진단형 체크 ---
@@ -792,7 +757,7 @@ def page_policies(company: dict) -> None:
 def page_more(model_name: str, company: dict) -> None:
     choice = st.radio(
         "선택",
-        ("CSV 검증", "K-Doctor 연동", "시스템 분석", "모델 비교"),
+        ("CSV 검증", "시스템 분석", "모델 비교", "보완 진단"),
         horizontal=True,
         label_visibility="collapsed",
         key="more_choice",
@@ -805,34 +770,21 @@ def page_more(model_name: str, company: dict) -> None:
     page_header(
         "부가 기능",
         "필요할 때만<br>꺼내 쓰세요",
-        "진단 연동, 시스템 분석, 모델 비교를 모아 두었습니다.",
+        "CSV 검증, 시스템 분석, 모델 비교를 모아 두었습니다. AX 보고서는 기초체력보기에서 업로드하세요.",
     )
 
-    if choice == "K-Doctor 연동":
-        kd = company.get("kdoctor") or {}
-        soft_card(str(kd.get("diagnosis_id", "-")), kd.get("summary", ""))
-        if st.button("이 결과 불러오기", type="primary", use_container_width=True, key="kd_link"):
-            st.session_state.last_result = {
-                "summary": kd.get("summary"),
-                "source": "kdoctor",
-                "diagnosis_id": kd.get("diagnosis_id"),
-                "priority_tasks": kd.get("priority_tasks"),
-                "ax_level": kd.get("ax_level"),
-            }
-            st.success("불러왔어요. 과업지시서 화면으로 이동해 작성하세요.")
-            navigate("과업지시서 작성")
-
-        with st.expander("보완 진단(선택)"):
-            profile = company_form(company, "diag")
-            if st.checkbox("합성 메모 사용", value=True, key="diag_sample"):
-                path = sample_files()["진단 메모"]
-                extra = load_sample(path) if path.exists() else ""
-            else:
-                extra = ""
-            if st.button("보완 진단 실행", key="diag_run", use_container_width=True):
-                with st.spinner("실행 중…"):
-                    result = diagnose(model_name, profile, extra)
-                show_result("보완진단", result)
+    if choice == "보완 진단":
+        soft_card("보완 진단", "보고서 업로드 외에 짧은 메모로 보완이 필요할 때만 쓰세요.")
+        profile = company_form(company, "diag")
+        if st.checkbox("합성 메모 사용", value=True, key="diag_sample"):
+            path = sample_files()["진단 메모"]
+            extra = load_sample(path) if path.exists() else ""
+        else:
+            extra = ""
+        if st.button("보완 진단 실행", key="diag_run", use_container_width=True):
+            with st.spinner("실행 중…"):
+                result = diagnose(model_name, profile, extra)
+            show_result("보완진단", result)
 
     elif choice == "시스템 분석":
         soft_card("시스템 현황", "과업 범위를 정할 때 참고하는 보조 기능입니다.")
@@ -893,16 +845,13 @@ def main() -> None:
     inject_styles()
     model_name, company = sidebar()
 
-    # 상단: 5스텝 진행 표시 (완료 ✓ / 현재 강조)
     current = st.session_state.get("page", STEPS[0])
     if current not in PAGES:
         current = STEPS[0]
         st.session_state.page = current
-    render_stepper(list(STEPS), current, completed_steps())
 
-    # 클릭 이동: 메인 5스텝 + 보조 더보기
     page = st.pills(
-        "진행 스텝",
+        "메뉴",
         options=list(PAGES),
         default=current if current in PAGES else STEPS[0],
         key="page",
@@ -911,8 +860,6 @@ def main() -> None:
     if page is None:
         page = current
         st.session_state.page = page
-
-    render_chat_panel(model_name, company, page)
 
     if page == "기초체력보기":
         page_fitness()

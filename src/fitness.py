@@ -333,48 +333,195 @@ def score_fitness(
     return result
 
 
-def fitness_from_kdoctor(kdoctor: dict[str, Any], company: dict[str, Any]) -> dict[str, Any]:
-    """K-Doctor 연동(합성) 데이터 → 기초체력 결과."""
-    df = kdoctor.get("data_fitness") or {}
-    # 구 0~2 점수를 1~5 척도로 대략 변환
-    def up(v: int, lo: int = 1, hi: int = 5) -> int:
-        return max(lo, min(hi, int(v) * 2 + 1))
+def _split_list(raw: str, *, known: tuple[str, ...] | list[str] | None = None) -> list[str]:
+    text = (raw or "").strip()
+    if not text:
+        return []
+    # 알려진 라벨(예: 공정/설비)을 먼저 매칭해 '/' 오분할 방지
+    if known:
+        found: list[str] = []
+        rest = text
+        for label in sorted(known, key=len, reverse=True):
+            if label in rest:
+                found.append(label)
+                rest = rest.replace(label, ",", 1)
+        if found:
+            return found
+    parts = []
+    for chunk in text.replace("·", ",").replace("\n", ",").split(","):
+        item = chunk.strip(" -•\t")
+        if item:
+            parts.append(item)
+    return parts
 
-    answers = {
-        "q4": up(int(df.get("ax_mindset", 1))),
-        "q10": up(int(df.get("digital_record", 1))),
-        "q11": up(int(df.get("shopfloor_data", 1))),
-        "q16": up(int(df.get("data_plan", 1))),
-        "q17": min(4, up(int(df.get("template_std", 1)))),
-        "q22": up(int(df.get("naming", 1))),
+
+def parse_ax_report(text: str) -> dict[str, Any]:
+    """업로드한 AX 자가진단 결과 보고서 텍스트 → 구조화 필드.
+
+    시연용 예시 파일의 '키: 값' / 불릿 형식을 파싱합니다.
+    키가 없으면 영역·문제 키워드를 본문에서 느슨하게 찾습니다.
+    """
+    lines = [ln.strip() for ln in (text or "").splitlines()]
+    fields: dict[str, str] = {}
+    bullets: list[str] = []
+    current_block: str | None = None
+    block_buf: list[str] = []
+
+    def flush_block() -> None:
+        nonlocal current_block, block_buf
+        if current_block and block_buf:
+            fields[current_block] = "\n".join(block_buf)
+        current_block, block_buf = None, []
+
+    for ln in lines:
+        if not ln or ln.startswith("#"):
+            continue
+        if ln.startswith(("- ", "• ", "* ")):
+            bullets.append(ln[2:].strip())
+            if current_block:
+                block_buf.append(ln[2:].strip())
+            continue
+        if ":" in ln or "：" in ln:
+            flush_block()
+            sep = "：" if "：" in ln and (":" not in ln or ln.index("：") < ln.index(":")) else ":"
+            key, val = ln.split(sep, 1)
+            key_n = key.strip().lower().replace(" ", "")
+            val = val.strip()
+            key_map = {
+                "진단id": "diagnosis_id",
+                "진단번호": "diagnosis_id",
+                "기업명": "company_name",
+                "업종": "industry",
+                "ax수준": "ax_level",
+                "ax레벨": "ax_level",
+                "ai적용영역": "ai_areas",
+                "적용영역": "ai_areas",
+                "ai적용희망영역": "ai_areas",
+                "해결문제": "ai_problems",
+                "해결하고싶은문제": "ai_problems",
+                "요약": "summary",
+                "진단요약": "summary",
+                "우선과제": "priority_tasks",
+                "q4": "q4",
+                "q10": "q10",
+                "q11": "q11",
+                "q16": "q16",
+                "q17": "q17",
+                "q22": "q22",
+                "비전목표점수": "q4",
+                "성과기여점수": "q10",
+                "데이터수집점수": "q11",
+                "모델전이점수": "q16",
+                "시스템연계점수": "q17",
+                "보안윤리점수": "q22",
+            }
+            mapped = key_map.get(key_n)
+            if mapped in {"summary", "priority_tasks", "ai_areas", "ai_problems"} and not val:
+                current_block = mapped
+                continue
+            if mapped:
+                fields[mapped] = val
+            continue
+        if current_block:
+            block_buf.append(ln)
+
+    flush_block()
+
+    all_problems = tuple(p for opts in AREA_PROBLEMS.values() for p in opts)
+    areas = _split_list(fields.get("ai_areas", ""), known=AI_AREAS)
+    if not areas:
+        areas = [a for a in AI_AREAS if a in text][:2]
+    problems = _split_list(fields.get("ai_problems", ""), known=all_problems)
+    if not problems:
+        # 우선과제 불릿·본문 문제 목록에서 후보 추출
+        known = set(all_problems)
+        problems = [b for b in bullets if b in known][:2]
+        if not problems:
+            problems = _split_list(fields.get("priority_tasks", ""), known=all_problems)[:2]
+
+    priority = _split_list(fields.get("priority_tasks", "")) or bullets[:3] or problems
+
+    answers: dict[str, int] = {}
+    for qid in ("q4", "q10", "q11", "q16", "q17", "q22"):
+        raw = fields.get(qid)
+        if raw and raw[:1].isdigit():
+            answers[qid] = int(raw[0])
+    # 점수 없으면 AX수준으로 대략 채움
+    if not answers:
+        ax = fields.get("ax_level", "")
+        base = {"초기": 2, "중간": 3, "높음": 4}.get(ax, 3)
+        answers = {qid: base for qid in ("q4", "q10", "q11", "q16", "q17", "q22")}
+        answers["q17"] = min(4, base)
+
+    return {
+        "diagnosis_id": fields.get("diagnosis_id", "UPLOAD"),
+        "company_name": fields.get("company_name"),
+        "industry": fields.get("industry"),
+        "ax_level": fields.get("ax_level", "중간"),
+        "summary": fields.get("summary", text[:400].strip()),
+        "ai_areas": areas,
+        "ai_problems": problems,
+        "priority_tasks": priority[:3],
+        "answers": answers,
+        "raw_excerpt": text[:1200],
     }
-    areas = list(kdoctor.get("ai_areas") or [])
-    problems = list(kdoctor.get("ai_problems") or kdoctor.get("priority_tasks") or [])
-    industry = kdoctor.get("industry") or company.get("industry")
+
+
+def fitness_from_report(text: str, company: dict[str, Any]) -> dict[str, Any]:
+    """업로드 보고서 → 기초체력 결과."""
+    parsed = parse_ax_report(text)
     tip_map = {
-        "초기": "K-Doctor AX수준이 초기입니다. 선택 영역부터 과업 범위를 좁히세요.",
-        "중간": "K-Doctor 진단 완료·AX 중간 수준입니다. 적용 희망 영역으로 과업지시서를 쓰세요.",
-        "높음": "K-Doctor 기준 준비가 양호합니다. 견적·정책자금 연계로 실행하세요.",
+        "초기": "보고서 기준 AX수준이 초기입니다. 선택 영역부터 과업 범위를 좁히세요.",
+        "중간": "보고서 기준 AX 중간 수준입니다. 적용 희망 영역으로 과업지시서를 쓰세요.",
+        "높음": "보고서 기준 준비가 양호합니다. 견적·정책자금 연계로 실행하세요.",
     }
-    ax = str(kdoctor.get("ax_level") or "")
+    ax = str(parsed.get("ax_level") or "")
     result = score_fitness(
-        answers,
-        source="kdoctor",
+        parsed["answers"],
+        source="report",
         extra={
-            "kdoctor_id": kdoctor.get("diagnosis_id"),
-            "kdoctor_summary": kdoctor.get("summary"),
-            "priority_tasks": problems[:3] or kdoctor.get("priority_tasks") or [],
-            "company_name": company.get("name"),
-            "pulled_at": kdoctor.get("pulled_at"),
-            "industry": industry,
-            "ai_areas": areas,
-            "ai_problems": problems,
+            "kdoctor_id": parsed.get("diagnosis_id"),
+            "kdoctor_summary": parsed.get("summary"),
+            "priority_tasks": parsed.get("priority_tasks") or [],
+            "company_name": parsed.get("company_name") or company.get("name"),
+            "industry": parsed.get("industry") or company.get("industry"),
+            "ai_areas": parsed.get("ai_areas") or [],
+            "ai_problems": parsed.get("ai_problems") or [],
+            "report_excerpt": parsed.get("raw_excerpt"),
             "tip": tip_map.get(ax) or tip_map["중간"],
         },
     )
     if ax == "초기" and result["level"] == "high":
         result["level"], result["label"] = "mid", "보완 필요"
-    # tip에 영역이 없으면 보강
+    areas = result.get("ai_areas") or []
     if areas and "AI 적용" not in str(result.get("tip", "")):
         result["tip"] = f"AI 적용 희망: {' · '.join(areas)}. {result['tip']}"
     return result
+
+
+def fitness_from_kdoctor(kdoctor: dict[str, Any], company: dict[str, Any]) -> dict[str, Any]:
+    """하위 호환: 합성 kdoctor dict → 보고서 파서와 동일 결과 형태로."""
+    df = kdoctor.get("data_fitness") or {}
+
+    def up(v: int, lo: int = 1, hi: int = 5) -> int:
+        return max(lo, min(hi, int(v) * 2 + 1))
+
+    blob = "\n".join(
+        [
+            f"진단ID: {kdoctor.get('diagnosis_id', '')}",
+            f"업종: {kdoctor.get('industry') or company.get('industry') or ''}",
+            f"AX수준: {kdoctor.get('ax_level', '')}",
+            f"AI적용영역: {', '.join(kdoctor.get('ai_areas') or [])}",
+            f"해결문제: {', '.join(kdoctor.get('ai_problems') or [])}",
+            f"요약: {kdoctor.get('summary', '')}",
+            "우선과제:",
+            *[f"- {t}" for t in (kdoctor.get("priority_tasks") or [])],
+            f"q4: {up(int(df.get('ax_mindset', 1)))}",
+            f"q10: {up(int(df.get('digital_record', 1)))}",
+            f"q11: {up(int(df.get('shopfloor_data', 1)))}",
+            f"q16: {up(int(df.get('data_plan', 1)))}",
+            f"q17: {min(4, up(int(df.get('template_std', 1))))}",
+            f"q22: {up(int(df.get('naming', 1)))}",
+        ]
+    )
+    return fitness_from_report(blob, company)

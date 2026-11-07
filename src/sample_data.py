@@ -98,6 +98,7 @@ COMPANIES = {
 def sample_files() -> dict[str, Path]:
     return {
         "진단 메모": SAMPLES / "hanbit_diagnosis.txt",
+        "AX 자가진단 보고서": SAMPLES / "한빛정밀_AX자가진단_결과보고서.txt",
         "시스템 목록": SAMPLES / "hanbit_systems.csv",
         "견적 A": SAMPLES / "quote_a.csv",
         "견적 B": SAMPLES / "quote_b.csv",
