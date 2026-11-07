@@ -66,4 +66,6 @@ def sample_files() -> dict[str, Path]:
         "시스템 목록": SAMPLES / "hanbit_systems.csv",
         "견적 A": SAMPLES / "quote_a.csv",
         "견적 B": SAMPLES / "quote_b.csv",
+        "표준 기업현황": SAMPLES / "한빛정밀_AX지원_기업현황.csv",
+        "표준 템플릿": SAMPLES / "템플릿_표준_기업현황.csv",
     }

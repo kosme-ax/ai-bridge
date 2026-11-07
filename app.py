@@ -12,7 +12,13 @@ from src.analysis import (
     generate_work_order,
 )
 from src.config import MODELS, model_status, runtime_settings
+from src.csv_validate import (
+    COMPANY_METRICS_COLUMNS,
+    validate_company_metrics,
+    validate_quote_csv,
+)
 from src.docs import load_sample, read_upload
+from src.fitness import FITNESS_QUESTIONS, score_fitness
 from src.reports import to_docx_bytes, to_pdf_bytes
 from src.sample_data import COMPANIES, sample_files
 from src.ui import inject_styles, page_header, render_footer, soft_card
@@ -24,14 +30,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-PAGES = ("과업지시서", "견적 비교", "더보기")
+PAGES = ("기초체력", "과업지시서", "견적 비교", "더보기")
 
 
 def init_state() -> None:
     st.session_state.setdefault("company_key", "한빛정밀")
     st.session_state.setdefault("last_result", None)
     st.session_state.setdefault("last_title", "")
-    st.session_state.setdefault("page", "과업지시서")
+    st.session_state.setdefault("fitness", None)
+    st.session_state.setdefault("page", "기초체력")
     settings = runtime_settings()
     st.session_state.setdefault("model_name", settings["default_model"])
 
@@ -58,10 +65,14 @@ def sidebar() -> tuple[str, dict]:
         status = model_status(model_name)
         st.caption(("live" if status["live"] else "mock") + f" · {status['model']}")
 
+        fit = st.session_state.get("fitness")
+        if fit:
+            st.caption(f"기초체력 {fit['label']} · {fit['total']}/{fit['max_score']}")
+
         with st.expander("안내"):
             st.write(
-                "진단은 K-Doctor에서 합니다. 여기서는 과업지시서와 견적 비교가 핵심입니다. "
-                "시연은 합성 데이터만 사용합니다."
+                "국민제안의 접수·서식(기시행) 위에, 기초체력 체크·CSV 검증·과업지시서·견적비교를 "
+                "잇는 실행 레이어입니다. 시연은 합성 데이터만 사용합니다."
             )
     return model_name, company
 
@@ -94,6 +105,7 @@ def company_form(company: dict, key_prefix: str) -> dict:
         "it_summary": it_summary,
         "pain_points": pain_points,
         "kdoctor": company.get("kdoctor") or {},
+        "fitness": st.session_state.get("fitness"),
     }
 
 
@@ -128,12 +140,66 @@ def show_result(title: str, result: dict) -> None:
     )
 
 
+def render_education(fit: dict) -> None:
+    if fit["level"] == "high":
+        return
+    soft_card("맞춤 교육 안내", fit["tip"])
+    for link in fit.get("education") or []:
+        st.link_button(link["title"], link["url"], use_container_width=True)
+
+
+def page_fitness() -> None:
+    page_header(
+        "고도화 ①",
+        "데이터 기초 체력을<br>먼저 확인해요",
+        "거창한 AI 평가가 아닙니다. 기록·수집 습관 8문항만 체크하세요.",
+    )
+
+    answers: dict[str, int] = {}
+    for q in FITNESS_QUESTIONS:
+        labels = [o[0] for o in q["options"]]
+        scores = {o[0]: o[1] for o in q["options"]}
+        choice = st.radio(q["text"], labels, horizontal=True, key=f"fit_{q['id']}")
+        answers[q["id"]] = scores[choice]
+
+    st.write("")
+    if st.button("결과 보기", type="primary", use_container_width=True, key="fit_run"):
+        fit = score_fitness(answers)
+        st.session_state.fitness = fit
+
+    fit = st.session_state.get("fitness")
+    if not fit:
+        return
+
+    st.metric("기초체력", f"{fit['label']}  {fit['total']}/{fit['max_score']}")
+    st.write(fit["tip"])
+    render_education(fit)
+
+    st.write("")
+    soft_card("다음 단계", "표준 CSV를 검증한 뒤 과업지시서를 작성하세요.")
+    c1, c2 = st.columns(2)
+    if c1.button("CSV 검증으로", use_container_width=True, key="go_csv"):
+        st.session_state.page = "더보기"
+        st.session_state.more_choice = "CSV 검증"
+        st.rerun()
+    if c2.button("과업지시서로", type="primary", use_container_width=True, key="go_wo"):
+        st.session_state.page = "과업지시서"
+        st.rerun()
+
+
 def page_work_order(model_name: str, company: dict) -> None:
     page_header(
         "핵심 기능",
         "과업지시서를<br>바로 작성해요",
-        "K-Doctor 진단을 바탕으로 AX 지원 과업지시서 초안을 만듭니다.",
+        "K-Doctor 진단과 기초체력 결과를 반영해 AX 지원 과업지시서 초안을 만듭니다.",
     )
+    fit = st.session_state.get("fitness")
+    if fit:
+        soft_card(f"기초체력 · {fit['label']}", fit["tip"])
+        render_education(fit)
+    else:
+        soft_card("기초체력 미실시", "먼저 「기초체력」에서 8문항을 체크하면 과업 톤이 맞춰집니다.")
+
     kd = company.get("kdoctor") or {}
     soft_card(
         kd.get("diagnosis_id", "진단 연동"),
@@ -146,7 +212,11 @@ def page_work_order(model_name: str, company: dict) -> None:
             result = generate_work_order(
                 model_name,
                 profile,
-                {"kdoctor": kd, **(st.session_state.get("last_result") or {})},
+                {
+                    "kdoctor": kd,
+                    "fitness": fit,
+                    **(st.session_state.get("last_result") or {}),
+                },
             )
         show_result("AX과업지시서", result)
 
@@ -155,7 +225,7 @@ def page_quotes(model_name: str, company: dict) -> None:
     page_header(
         "핵심 기능",
         "견적을<br>비교해요",
-        "과업 범위에 맞춰 공급사 견적을 정리합니다. 단가 차이만으로 판단하지 않아요.",
+        "과업 범위에 맞춰 공급사 견적을 정리합니다. CSV면 표준 컬럼도 함께 검사해요.",
     )
     parts = []
     use_sample = st.toggle("샘플 견적 사용", value=True, key="quote_sample")
@@ -164,6 +234,11 @@ def page_quotes(model_name: str, company: dict) -> None:
             path = sample_files()[key]
             if path.exists():
                 parts.append(f"# {key}\n{load_sample(path)}")
+                report = validate_quote_csv(path.name, path.read_bytes(), check_name=False)
+                if report["ok"]:
+                    st.caption(f"{key}: 표준 컬럼 OK · {report['row_count']}행")
+                else:
+                    st.caption(f"{key}: {', '.join(report['issues'])}")
         soft_card("샘플 견적 A / B", "합성 데이터로 비교 흐름만 보여줍니다.")
     else:
         uploads = st.file_uploader(
@@ -173,7 +248,14 @@ def page_quotes(model_name: str, company: dict) -> None:
             key="quote_up",
         )
         for f in uploads or []:
-            parts.append(f"# {f.name}\n{read_upload(f.name, f.getvalue())}")
+            raw = f.getvalue()
+            parts.append(f"# {f.name}\n{read_upload(f.name, raw)}")
+            if f.name.lower().endswith((".csv", ".xlsx")):
+                report = validate_quote_csv(f.name, raw, check_name=False)
+                if report["ok"]:
+                    st.success(f"{f.name}: 표준 컬럼 OK")
+                else:
+                    st.warning(f"{f.name}: {'; '.join(report['issues']) or '검사 실패'}")
 
     st.write("")
     if st.button("비교하기", type="primary", use_container_width=True, key="quote_run"):
@@ -186,19 +268,80 @@ def page_quotes(model_name: str, company: dict) -> None:
             show_result("견적비교", result)
 
 
-def page_more(model_name: str, company: dict) -> None:
+def page_csv_validate() -> None:
     page_header(
-        "부가 기능",
-        "필요할 때만<br>꺼내 쓰세요",
-        "진단 연동 보완, 시스템 분석, 모델 비교는 여기 모아 두었습니다.",
+        "고도화 ②",
+        "표준 CSV인지<br>바로 검사해요",
+        "필수 컬럼·숫자형·파일명(기업명_사업명_문서종류)을 확인합니다.",
     )
+    soft_card(
+        "필수 컬럼",
+        ", ".join(COMPANY_METRICS_COLUMNS),
+    )
+    tpl = sample_files()["표준 템플릿"]
+    if tpl.exists():
+        st.download_button(
+            "빈 표준 템플릿 받기",
+            data=tpl.read_bytes(),
+            file_name="템플릿_표준_기업현황.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="dl_tpl",
+        )
 
+    use_sample = st.toggle("샘플 기업현황 검사", value=True, key="metrics_sample")
+    if use_sample:
+        path = sample_files()["표준 기업현황"]
+        data = path.read_bytes()
+        name = path.name
+    else:
+        uploaded = st.file_uploader("기업현황 CSV/XLSX", type=["csv", "xlsx"], key="metrics_up")
+        if not uploaded:
+            return
+        data = uploaded.getvalue()
+        name = uploaded.name
+
+    if st.button("검사하기", type="primary", use_container_width=True, key="metrics_run"):
+        report = validate_company_metrics(name, data)
+        st.session_state["csv_report"] = report
+
+    report = st.session_state.get("csv_report")
+    if not report:
+        return
+
+    if report["ok"]:
+        st.success(f"통과 · {report['row_count']}행 · {report['filename']}")
+    else:
+        st.error("미통과 — 아래를 고쳐 다시 올려 주세요.")
+        for issue in report["issues"]:
+            st.write(f"- {issue}")
+
+    st.caption(report["filename_check"]["message"])
+    if report.get("preview") is not None:
+        st.dataframe(report["preview"], use_container_width=True)
+
+    if report["ok"] and st.button("과업지시서 작성으로", type="primary", use_container_width=True):
+        st.session_state.page = "과업지시서"
+        st.rerun()
+
+
+def page_more(model_name: str, company: dict) -> None:
     choice = st.radio(
         "선택",
-        ("K-Doctor 연동", "시스템 분석", "모델 비교"),
+        ("CSV 검증", "K-Doctor 연동", "시스템 분석", "모델 비교"),
         horizontal=True,
         label_visibility="collapsed",
         key="more_choice",
+    )
+
+    if choice == "CSV 검증":
+        page_csv_validate()
+        return
+
+    page_header(
+        "부가 기능",
+        "필요할 때만<br>꺼내 쓰세요",
+        "진단 연동, 시스템 분석, 모델 비교를 모아 두었습니다.",
     )
 
     if choice == "K-Doctor 연동":
@@ -294,7 +437,9 @@ def main() -> None:
         key="page",
     )
 
-    if page == "과업지시서":
+    if page == "기초체력":
+        page_fitness()
+    elif page == "과업지시서":
         page_work_order(model_name, company)
     elif page == "견적 비교":
         page_quotes(model_name, company)
