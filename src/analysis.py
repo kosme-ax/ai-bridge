@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.llm import generate_json
+from src.prompt_templates import build_fitness_context, quotation_prompt, work_order_prompt
 
 
 def diagnose(model_name: str, company: dict[str, Any], extra_text: str = "") -> dict[str, Any]:
@@ -44,37 +45,52 @@ def generate_work_order(
     company: dict[str, Any],
     diagnosis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """AX 지원용 과업지시서(핵심 산출물). 진단은 입력, 본 함수가 본업."""
+    """표준 RFP/과업지시서 초안. 상세 프롬프트는 UI에 노출하지 않음."""
     kdoctor = company.get("kdoctor") or {}
     fitness = company.get("fitness") or (diagnosis or {}).get("fitness") or {}
-    ai_areas = fitness.get("ai_areas") or kdoctor.get("ai_areas") or []
-    ai_problems = fitness.get("ai_problems") or kdoctor.get("ai_problems") or []
-    context = (
-        f"기업: {company}\n"
-        f"K-Doctor 진단 연동: {kdoctor}\n"
-        f"기초체력(AX 자가진단형): {fitness}\n"
-        f"AI 적용 희망 영역: {ai_areas}\n"
-        f"해결하고 싶은 문제: {ai_problems}\n"
-        f"추가 진단/분석 결과: {diagnosis or {}}"
+    ai_areas = list(fitness.get("ai_areas") or kdoctor.get("ai_areas") or [])
+    ai_problems = list(fitness.get("ai_problems") or kdoctor.get("ai_problems") or [])
+    extra = {
+        k: v
+        for k, v in (diagnosis or {}).items()
+        if k not in {"fitness", "kdoctor"} and not str(k).startswith("_")
+    }
+    context = "\n".join(
+        [
+            f"기업명: {company.get('name')}",
+            f"업종: {company.get('industry')}",
+            f"인원: {company.get('employees')}",
+            f"주요업무: {company.get('main_tasks')}",
+            f"IT현황: {company.get('it_summary')}",
+            f"고충: {company.get('pain_points')}",
+            f"K-Doctor: {kdoctor.get('diagnosis_id')} / AX수준 {kdoctor.get('ax_level')}",
+            f"K-Doctor요약: {kdoctor.get('summary')}",
+            f"K-Doctor우선과제: {kdoctor.get('priority_tasks')}",
+            build_fitness_context(fitness),
+            f"추가입력키: {list(extra.keys())}",
+        ]
     )
-    prompt = f"""키워드: work_order
-당신은 중진공 AX 지원 담당자의 업무보조 AI입니다.
-K-Doctor AX 자가진단에서 끝난 '기업진단'을 다시 하지 말고,
-그 결과와 **AI 적용 희망 영역**을 바탕으로 **AX 지원 과업지시서** 초안을 작성하십시오.
-시장가격·임의 단가를 만들지 마십시오.
-
-반드시 강조할 것:
-- 과업 목적·범위는 선택한 AI 적용 영역({ai_areas})과 해결 문제({ai_problems})에 맞출 것
-- 산출물, 일정(단계), 역할(발주/수행/검수), 검수기준, 위험·가정
-- 진단 결과에서 도출된 우선 과제와의 연결
-
-{context}
-
-JSON 키: title, summary, objectives, scope, deliverables, schedule_phases,
-roles, acceptance_criteria, assumptions, linked_diagnosis_points,
-target_ai_areas, sections(객체), human_review_risks
-"""
-    return generate_json(model_name, "work_order", prompt, context)
+    # 프롬프트 본문은 생성에만 사용 · 반환 JSON에 넣지 않음
+    prompt = work_order_prompt(context=context, ai_areas=ai_areas, ai_problems=ai_problems)
+    result = generate_json(model_name, "work_order", prompt, context)
+    # 안전: 프롬프트 키가 섞여 있으면 제거
+    for key in ("_prompt", "prompt", "raw_prompt", "system_prompt"):
+        result.pop(key, None)
+    result.setdefault("document_type", "표준RFP/과업지시서")
+    result.setdefault(
+        "fitness_basis",
+        {
+            "industry": fitness.get("industry") or company.get("industry"),
+            "ai_areas": ai_areas,
+            "ai_problems": ai_problems,
+            "level": fitness.get("level"),
+            "label": fitness.get("label"),
+            "tip": fitness.get("tip"),
+        },
+    )
+    result.setdefault("target_ai_areas", ai_areas)
+    result.setdefault("target_problems", ai_problems)
+    return result
 
 
 def generate_rfp(
@@ -82,7 +98,6 @@ def generate_rfp(
     company: dict[str, Any],
     diagnosis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """하위 호환: 과업지시서 생성으로 위임."""
     return generate_work_order(model_name, company, diagnosis)
 
 
@@ -90,20 +105,14 @@ def compare_quotations(model_name: str, company: dict[str, Any], quote_text: str
     context = (
         f"기업: {company.get('name')}\n"
         f"K-Doctor 연계 우선과제: {(company.get('kdoctor') or {}).get('priority_tasks')}\n"
+        f"기초체력: {build_fitness_context(company.get('fitness'))}\n"
         f"견적자료:\n{quote_text[:14000]}"
     )
-    prompt = f"""키워드: quotation
-AX 지원 과업지시서 이행을 위한 공급사 견적을 비교하십시오.
-본 서비스의 핵심 산출물 중 하나입니다.
-단가 차이만으로 부적정이라고 단정하지 마십시오. 확인되지 않은 시장가를 만들지 마십시오.
-과업 범위·산출물·검수기준 관점에서 비교 포인트를 제시하십시오.
-
-{context}
-
-JSON 키: summary, currency, vendors(name,supply_amount,vat_amount,total_amount,notes),
-scope_fit, comparison_notes, open_questions, recommendation, human_review_risks
-"""
-    return generate_json(model_name, "quotation", prompt, context)
+    prompt = quotation_prompt(context=context)
+    result = generate_json(model_name, "quotation", prompt, context)
+    for key in ("_prompt", "prompt", "raw_prompt", "system_prompt"):
+        result.pop(key, None)
+    return result
 
 
 def compare_models(model_a: str, model_b: str, company: dict[str, Any], question: str) -> dict[str, Any]:

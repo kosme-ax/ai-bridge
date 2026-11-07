@@ -26,7 +26,7 @@ from src.fitness import (
     score_fitness,
 )
 from src.policies import POLICIES, recommend_policies
-from src.reports import to_docx_bytes, to_pdf_bytes
+from src.reports import RFP_SECTION_ORDER, to_docx_bytes, to_pdf_bytes
 from src.sample_data import COMPANIES, sample_files
 from src.ui import inject_styles, page_header, policy_card, render_footer, soft_card, vendor_card
 from src.vendors import VENDORS, recommend_vendors
@@ -159,15 +159,58 @@ def company_form(company: dict, key_prefix: str) -> dict:
 
 def show_result(title: str, result: dict) -> None:
     st.session_state.last_title = title
-    st.session_state.last_result = result
-    meta = result.get("_meta") or {}
+    # 프롬프트·내부 키는 세션/화면에서 제외
+    clean = {
+        k: v
+        for k, v in result.items()
+        if k not in {"_prompt", "prompt", "raw_prompt", "system_prompt"}
+    }
+    st.session_state.last_result = clean
+    meta = clean.get("_meta") or {}
     st.success(f"완료 · {meta.get('model_name')} · {meta.get('mode')}")
-    if result.get("summary"):
-        st.write(result["summary"])
-    with st.expander("전체 결과"):
-        st.json({k: v for k, v in result.items() if k != "_meta"})
-    pdf = to_pdf_bytes(title, result)
-    docx = to_docx_bytes(title, result)
+    if clean.get("summary"):
+        st.write(clean["summary"])
+
+    basis = clean.get("fitness_basis") or {}
+    if basis.get("ai_areas") or basis.get("ai_problems"):
+        soft_card(
+            "기초체력 반영",
+            " · ".join(
+                [
+                    x
+                    for x in [
+                        " · ".join(basis.get("ai_areas") or []) or "",
+                        " / ".join(basis.get("ai_problems") or []) or "",
+                    ]
+                    if x
+                ]
+            ),
+        )
+
+    sections = clean.get("sections") or {}
+    if isinstance(sections, dict) and sections:
+        for key, heading in RFP_SECTION_ORDER:
+            body = sections.get(key)
+            if not body:
+                continue
+            with st.expander(heading, expanded=(key in {"사업개요", "현황및문제점", "기초체력진단요약"})):
+                if isinstance(body, (list, dict)):
+                    st.write(body)
+                else:
+                    st.write(body)
+    else:
+        # 견적 등: 요약 외 주요 필드만 (원본 JSON·프롬프트 비공개)
+        for key in ("recommendation", "comparison_notes", "open_questions", "human_review_risks"):
+            val = clean.get(key)
+            if not val:
+                continue
+            if isinstance(val, list):
+                soft_card(key, " · ".join(str(x) for x in val)[:800])
+            else:
+                soft_card(key, str(val)[:800])
+
+    pdf = to_pdf_bytes(title, clean)
+    docx = to_docx_bytes(title, clean)
     safe = title.replace(" ", "_")
     b1, b2 = st.columns(2)
     b1.download_button(
@@ -453,16 +496,22 @@ def page_fitness() -> None:
 
 
 def page_work_order(model_name: str, company: dict) -> None:
-    page_header("과업지시서", "과업지시서를<br>만들어요", "적용 영역을 반영한 초안입니다.")
+    page_header(
+        "과업지시서",
+        "표준 RFP를<br>만들어요",
+        "기초체력 설문·보고서를 반영한 국민제안형 표준 과업지시서입니다.",
+    )
     fit = st.session_state.get("fitness")
     if fit and (fit.get("ai_areas") or fit.get("label")):
         soft_card(
             fit.get("label") or "기초체력",
             " · ".join(fit.get("ai_areas") or []) or fit.get("tip", ""),
         )
+    else:
+        soft_card("기초체력 권장", "상단 「기초체력」에서 설문·보고서를 먼저 하면 RFP가 더 구체적입니다.")
     kd = company.get("kdoctor") or {}
     profile = company_form(company, "wo")
-    if st.button("만들기", type="primary", use_container_width=True, key="wo_run"):
+    if st.button("표준 RFP 만들기", type="primary", use_container_width=True, key="wo_run"):
         with st.spinner("작성 중…"):
             result = generate_work_order(
                 model_name,
