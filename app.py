@@ -18,6 +18,7 @@ from src.csv_validate import (
     validate_quote_csv,
 )
 from src.docs import load_sample, read_upload
+from src.chatbot import build_context, reply_chat
 from src.fitness import FITNESS_QUESTIONS, score_fitness
 from src.policies import POLICIES, recommend_policies
 from src.reports import to_docx_bytes, to_pdf_bytes
@@ -40,6 +41,7 @@ def init_state() -> None:
     st.session_state.setdefault("last_title", "")
     st.session_state.setdefault("fitness", None)
     st.session_state.setdefault("page", "기초체력")
+    st.session_state.setdefault("chat_messages", [])
     settings = runtime_settings()
     st.session_state.setdefault("model_name", settings["default_model"])
 
@@ -139,6 +141,48 @@ def show_result(title: str, result: dict) -> None:
         key=f"dl_docx_{safe}",
         use_container_width=True,
     )
+
+
+def render_chat_panel(model_name: str, company: dict, page: str) -> None:
+    with st.expander("AI 상담 · 기초체력 · 과업 · 견적 · 정책", expanded=False):
+        st.caption("자세히 묻고 싶을 때 여기서 이어가세요. 화면 메뉴와 같이 쓰면 좋아요.")
+        for msg in st.session_state.chat_messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        c1, c2, c3, c4 = st.columns(4)
+        quick = None
+        if c1.button("기초체력", use_container_width=True, key="chat_q_fit"):
+            quick = "기초체력 결과가 어떻게 나왔고, 다음에 뭘 하면 좋을까요?"
+        if c2.button("과업지시서", use_container_width=True, key="chat_q_wo"):
+            quick = "과업지시서에 넣을 우선 과업을 짧게 잡아 주세요."
+        if c3.button("견적", use_container_width=True, key="chat_q_qt"):
+            quick = "견적 비교할 때 어떤 항목을 보면 되나요?"
+        if c4.button("정책자금", use_container_width=True, key="chat_q_pol"):
+            quick = "지금 기업에 맞는 중진공 기술자금이나 지역 AI 대전환을 알려 주세요."
+
+        prompt = st.chat_input("궁금한 점을 입력하세요")
+        user_text = quick or prompt
+        if not user_text:
+            return
+
+        st.session_state.chat_messages.append({"role": "user", "content": user_text})
+        context = build_context(
+            company=company,
+            fitness=st.session_state.get("fitness"),
+            last_title=st.session_state.get("last_title") or "",
+            last_result=st.session_state.get("last_result"),
+            page=page,
+        )
+        history = [
+            {"role": m["role"], "content": m["content"]}
+            for m in st.session_state.chat_messages[:-1]
+            if m["role"] in ("user", "assistant")
+        ]
+        with st.spinner("답변 작성 중…"):
+            answer = reply_chat(model_name, history, user_text, context)
+        st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+        st.rerun()
 
 
 def render_education(fit: dict) -> None:
@@ -493,6 +537,8 @@ def main() -> None:
         label_visibility="collapsed",
         key="page",
     )
+
+    render_chat_panel(model_name, company, page)
 
     if page == "기초체력":
         page_fitness()

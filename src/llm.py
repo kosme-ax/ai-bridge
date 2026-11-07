@@ -126,16 +126,24 @@ def _mock_payload(task: str, context: str) -> dict[str, Any]:
     }
 
 
-def _call_upstage(cfg: dict[str, Any], prompt: str) -> str:
+def _call_upstage(
+    cfg: dict[str, Any],
+    prompt: str,
+    *,
+    system: str = SYSTEM,
+    messages: list[dict[str, str]] | None = None,
+    temperature: float = 0.2,
+) -> str:
     url = f"{cfg['base_url'].rstrip('/')}/chat/completions"
     headers = {"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"}
+    msgs = messages or [
+        {"role": "system", "content": system},
+        {"role": "user", "content": prompt},
+    ]
     body = {
         "model": cfg["model"],
-        "messages": [
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0.2,
+        "messages": msgs,
+        "temperature": temperature,
     }
     with httpx.Client(timeout=90) as client:
         resp = client.post(url, headers=headers, json=body)
@@ -144,14 +152,30 @@ def _call_upstage(cfg: dict[str, Any], prompt: str) -> str:
     return data["choices"][0]["message"]["content"]
 
 
-def _call_google(cfg: dict[str, Any], prompt: str) -> str:
+def _call_google(
+    cfg: dict[str, Any],
+    prompt: str,
+    *,
+    system: str = SYSTEM,
+    as_json: bool = True,
+    history: list[dict[str, str]] | None = None,
+    temperature: float = 0.2,
+) -> str:
     model = cfg["model"]
     url = f"{cfg['base_url'].rstrip('/')}/models/{model}:generateContent"
     headers = {"Content-Type": "application/json", "x-goog-api-key": cfg["api_key"]}
+    contents: list[dict[str, Any]] = []
+    for m in history or []:
+        role = "user" if m.get("role") == "user" else "model"
+        contents.append({"role": role, "parts": [{"text": m.get("content") or ""}]})
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
+    gen_cfg: dict[str, Any] = {"temperature": temperature}
+    if as_json:
+        gen_cfg["responseMimeType"] = "application/json"
     body = {
-        "systemInstruction": {"parts": [{"text": SYSTEM}]},
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"},
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": contents,
+        "generationConfig": gen_cfg,
     }
     with httpx.Client(timeout=90) as client:
         resp = client.post(url, headers=headers, json=body)
@@ -162,6 +186,52 @@ def _call_google(cfg: dict[str, Any], prompt: str) -> str:
         for part in (cand.get("content") or {}).get("parts") or []:
             text += part.get("text") or ""
     return text
+
+
+def generate_chat(
+    model_name: str,
+    *,
+    system: str,
+    history: list[dict[str, str]],
+    user_text: str,
+    context_json: str = "",
+    mock_fn=None,
+) -> str:
+    """자유 대화 응답. 키 없으면 mock_fn 또는 간단 안내."""
+    settings = runtime_settings()
+    if model_name not in settings["models"]:
+        raise ValueError(f"등록되지 않은 모델: {model_name}")
+    cfg = settings["models"][model_name]
+    prompt = user_text
+    if context_json:
+        prompt = f"[세션 컨텍스트 JSON]\n{context_json}\n\n[사용자]\n{user_text}"
+
+    if not cfg.get("api_key"):
+        if callable(mock_fn):
+            return str(mock_fn(user_text, context_json))
+        return "API 키가 없어 상담 Mock만 가능합니다. Secrets에 키를 넣으면 더 자세히 답합니다."
+
+    try:
+        if cfg["provider"] == "upstage":
+            messages = [{"role": "system", "content": system}]
+            for m in history[-8:]:
+                messages.append({"role": m["role"], "content": m["content"]})
+            messages.append({"role": "user", "content": prompt})
+            return _call_upstage(cfg, prompt, system=system, messages=messages, temperature=0.4)
+        if cfg["provider"] == "google":
+            return _call_google(
+                cfg,
+                prompt,
+                system=system,
+                as_json=False,
+                history=history[-8:],
+                temperature=0.4,
+            )
+        raise ValueError(f"지원하지 않는 provider: {cfg['provider']}")
+    except Exception as exc:
+        if callable(mock_fn):
+            return f"(연결 불안정 · Mock) {mock_fn(user_text, context_json)}\n\n_{exc.__class__.__name__}_"
+        return f"상담 응답에 실패했습니다: {exc.__class__.__name__}"
 
 
 def generate_json(model_name: str, task: str, prompt: str, context: str = "") -> dict[str, Any]:
