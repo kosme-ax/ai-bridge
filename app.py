@@ -69,17 +69,28 @@ def sidebar() -> str:
     return model_name
 
 
-def company_form(company: dict) -> dict:
+def company_form(company: dict, key_prefix: str) -> dict:
     st.subheader("기업 정보")
     c1, c2 = st.columns(2)
     with c1:
-        name = st.text_input("기업명", company["name"])
-        industry = st.text_input("업종", company["industry"])
-        employees = st.number_input("인원", min_value=1, value=int(company["employees"]))
+        name = st.text_input("기업명", company["name"], key=f"{key_prefix}_name")
+        industry = st.text_input("업종", company["industry"], key=f"{key_prefix}_industry")
+        employees = st.number_input(
+            "인원",
+            min_value=1,
+            value=int(company["employees"]),
+            key=f"{key_prefix}_employees",
+        )
     with c2:
-        main_tasks = st.text_area("주요 업무", company["main_tasks"], height=80)
-        it_summary = st.text_area("IT 현황", company["it_summary"], height=80)
-        pain_points = st.text_area("고충", company["pain_points"], height=80)
+        main_tasks = st.text_area(
+            "주요 업무", company["main_tasks"], height=80, key=f"{key_prefix}_main_tasks"
+        )
+        it_summary = st.text_area(
+            "IT 현황", company["it_summary"], height=80, key=f"{key_prefix}_it_summary"
+        )
+        pain_points = st.text_area(
+            "고충", company["pain_points"], height=80, key=f"{key_prefix}_pain_points"
+        )
     return {
         "name": name,
         "industry": industry,
@@ -102,27 +113,35 @@ def show_result(title: str, result: dict) -> None:
         st.json({k: v for k, v in result.items() if k != "_meta"})
     pdf = to_pdf_bytes(title, result)
     docx = to_docx_bytes(title, result)
+    safe = title.replace(" ", "_")
     b1, b2 = st.columns(2)
-    b1.download_button("PDF 다운로드", data=pdf, file_name=f"{title}.pdf", mime="application/pdf")
+    b1.download_button(
+        "PDF 다운로드",
+        data=pdf,
+        file_name=f"{title}.pdf",
+        mime="application/pdf",
+        key=f"dl_pdf_{safe}",
+    )
     b2.download_button(
         "DOCX 다운로드",
         data=docx,
         file_name=f"{title}.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        key=f"dl_docx_{safe}",
     )
 
 
 def tab_diagnosis(model_name: str, company: dict) -> None:
     st.markdown("### 1. 기업 AI 도입 진단")
     st.caption("기업정보를 바탕으로 맞춤형 도입 과제를 도출합니다.")
-    profile = company_form(company)
-    use_sample = st.checkbox("합성 진단 메모 불러오기", value=True)
+    profile = company_form(company, "diag")
+    use_sample = st.checkbox("합성 진단 메모 불러오기", value=True, key="diag_sample")
     extra = ""
     if use_sample:
         path = sample_files()["진단 메모"]
         if path.exists():
             extra = load_sample(path)
-            st.text_area("진단 메모(미리보기)", extra, height=120)
+            st.text_area("진단 메모(미리보기)", extra, height=120, key="diag_memo_preview")
     uploaded = st.file_uploader("추가 자료 업로드 (txt/pdf/docx/csv)", type=["txt", "pdf", "docx", "csv"], key="diag_up")
     if uploaded:
         extra = (extra + "\n\n" + read_upload(uploaded.name, uploaded.getvalue())).strip()
@@ -136,15 +155,15 @@ def tab_systems(model_name: str, company: dict) -> None:
     st.markdown("### 2. 기존 시스템 분석")
     st.caption("기존 문서 업로드 및 현황 분석")
     doc_text = ""
-    if st.checkbox("합성 시스템 목록 불러오기", value=True):
+    if st.checkbox("합성 시스템 목록 불러오기", value=True, key="sys_sample"):
         path = sample_files()["시스템 목록"]
         if path.exists():
             doc_text = load_sample(path)
-            st.dataframe(__import__("pandas").read_csv(path))
+            st.dataframe(__import__("pandas").read_csv(path), key="sys_sample_df")
     uploaded = st.file_uploader("시스템/업무 문서", type=["txt", "pdf", "docx", "csv", "xlsx"], key="sys_up")
     if uploaded:
         doc_text = read_upload(uploaded.name, uploaded.getvalue())
-        st.text_area("추출 텍스트", doc_text[:4000], height=160)
+        st.text_area("추출 텍스트", doc_text[:4000], height=160, key="sys_extracted")
     if st.button("시스템 분석 실행", type="primary", key="sys_run"):
         if not doc_text.strip():
             st.warning("분석할 문서가 없습니다.")
@@ -157,7 +176,7 @@ def tab_systems(model_name: str, company: dict) -> None:
 def tab_rfp(model_name: str, company: dict) -> None:
     st.markdown("### 3. RFP 자동 생성")
     st.caption("AI 도입 요구사항과 제안요청서 초안")
-    profile = company_form(company)
+    profile = company_form(company, "rfp")
     if st.button("RFP 초안 생성", type="primary", key="rfp_run"):
         with st.spinner("RFP 작성 중…"):
             result = generate_rfp(model_name, profile, st.session_state.get("last_result"))
@@ -173,13 +192,13 @@ def tab_quotes(model_name: str, company: dict) -> None:
     st.markdown("### 4. 견적 비교 분석")
     st.caption("견적서 항목 분류 및 비용 검토 (단가 차이 ≠ 부적정)")
     parts = []
-    if st.checkbox("합성 견적 A/B 불러오기", value=True):
+    if st.checkbox("합성 견적 A/B 불러오기", value=True, key="quote_sample"):
         for key in ("견적 A", "견적 B"):
             path = sample_files()[key]
             if path.exists():
                 parts.append(f"# {key}\n{load_sample(path)}")
                 st.markdown(f"**{key}**")
-                st.dataframe(__import__("pandas").read_csv(path))
+                st.dataframe(__import__("pandas").read_csv(path), key=f"quote_df_{key}")
     uploads = st.file_uploader(
         "견적 파일 (복수 가능)",
         type=["txt", "csv", "xlsx", "pdf", "docx"],
