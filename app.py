@@ -10,10 +10,13 @@ from src.config import MODELS, model_status, runtime_settings
 from src.docs import load_sample, read_upload
 from src.reports import to_docx_bytes, to_pdf_bytes
 from src.sample_data import COMPANIES, sample_files
+from src.ui import inject_styles, render_footer, render_hero, render_top
 
 st.set_page_config(
     page_title="AI-Bridge | 중소기업 AX 도입 도우미",
+    page_icon="🔵",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 NOTICE = (
@@ -33,8 +36,8 @@ def init_state() -> None:
 
 def sidebar() -> str:
     with st.sidebar:
-        st.markdown("### AI-Bridge")
-        st.caption("공공 기업지원 · AX 도입 업무보조 MVP")
+        st.markdown("### 설정")
+        st.caption("공공 기업지원 · AX 도입 업무보조")
         st.info(NOTICE)
 
         settings = runtime_settings()
@@ -225,14 +228,14 @@ def tab_compare(model_name: str, company: dict) -> None:
 
 def main() -> None:
     init_state()
+    inject_styles()
     model_name = sidebar()
     company = COMPANIES[st.session_state.company_key]
 
-    st.title("AI-Bridge")
-    st.markdown("중소기업 **AX(AI 전환) 도입**을 위한 공공 기업지원 업무보조 MVP")
-    st.caption("Streamlit · 상용 LLM API 2종 · 가상 기업 시연 · 파일 비영구 처리")
+    render_top()
+    render_hero()
 
-    tabs = st.tabs(["진단", "시스템 분석", "RFP", "견적 비교", "모델 비교", "사용 안내"])
+    tabs = st.tabs(["AI진단", "시스템 분석", "RFP", "견적 비교", "모델 비교", "사용 안내"])
     with tabs[0]:
         tab_diagnosis(model_name, company)
     with tabs[1]:
@@ -256,14 +259,10 @@ streamlit run app.py
 ```
 
 ### Streamlit Community Cloud
-1. 이 저장소를 GitHub/GitLab에 푸시
-2. Streamlit Cloud에서 앱 생성 → `app.py`
-3. Secrets에 API 키 등록 (`.streamlit/secrets.toml.example` 참고)
-
-### GitLab
-- 소스는 GitLab에 올립니다.
-- Streamlit Community Cloud는 GitHub 연동이 가장 단순합니다. GitLab만 쓰면 CI로 컨테이너 배포하거나 GitHub 미러를 쓰십시오.
-- **GitLab Pages는 정적 호스팅이라 이 Streamlit 앱에 적합하지 않습니다.**
+1. 이 저장소를 GitHub에 푸시
+2. Streamlit Cloud에서 앱 생성 → `streamlit_app.py`
+3. App URL: `sme-ai-helper`
+4. Secrets에 API 키 등록 (`.streamlit/secrets.toml.example` 참고)
 
 ### 보안
 - API 키는 브라우저/프론트에 넣지 않습니다.
@@ -271,6 +270,7 @@ streamlit run app.py
 - 업로드는 세션 처리만 하고 DB/영구 저장을 쓰지 않습니다.
 """
         )
+    render_footer()
 
 
 if __name__ == "__main__":
