@@ -249,17 +249,17 @@ def render_top() -> None:
     st.markdown(
         """
 <div class="kd-topbar">
-  <div>중소벤처기업진흥공단 · 공공 기업지원 시연</div>
+  <div>K-Doctor 진단 완료 기업 → AX 지원 후속업무 시연</div>
   <div>
-    <a href="https://kdoctor.kosmes.or.kr/main.do?v=f" target="_blank">K-Doctor 바로가기</a>
+    <a href="https://kdoctor.kosmes.or.kr/main.do?v=f" target="_blank">K-Doctor 진단</a>
     <a href="https://www.kosmes.or.kr/" target="_blank">중진공</a>
   </div>
 </div>
 <div class="kd-brand">
   <div class="kd-mark">AX</div>
   <div>
-    <div class="kd-brand-title">AI-Bridge · 중소기업 AX 도입 도우미</div>
-    <div class="kd-brand-sub">중진공 AI진단 톤의 대회 시연용 업무보조 MVP</div>
+    <div class="kd-brand-title">AI-Bridge · AX 과업지시서 · 견적비교</div>
+    <div class="kd-brand-sub">진단은 K-Doctor가, 지원 실행 문서는 AI-Bridge가</div>
   </div>
 </div>
 """,
@@ -271,18 +271,20 @@ def render_hero() -> None:
     st.markdown(
         """
 <div class="kd-hero">
-  <div class="kd-eyebrow">빅데이터 · 상용 LLM · 가상기업 시연</div>
-  <h1>AX 도입을 위한 AI 업무보조 시스템</h1>
+  <div class="kd-eyebrow">핵심 = 과업지시서 작성 + 견적 비교 · 진단은 연동 입력</div>
+  <h1>진단 이후의 AX 지원, 여기서 실행합니다</h1>
   <p>
-    고객 참여형 진단 모델처럼, 온라인에서 기업의 AX(AI 전환) 준비도를 점검하고
-    시스템 분석 · RFP · 견적 비교까지 이어지는 최적 솔루션 초안을 제공합니다.
+    <a href="https://kdoctor.kosmes.or.kr/main.do?v=f" target="_blank" style="color:#9FD0FF;">K-Doctor</a>에서
+    끝난 기업진단 데이터를 받아, 중진공 AX 지원에 필요한
+    <strong>과업지시서</strong>와 <strong>공급사 견적 비교</strong> 초안을 만듭니다.
+    진단 자체를 대체하지 않습니다.
   </p>
 </div>
 <div class="kd-stats">
-  <div class="kd-stat"><div class="ring">①</div><div class="label">진단 기능</div><div class="value">4</div></div>
-  <div class="kd-stat"><div class="ring">②</div><div class="label">연동 모델</div><div class="value">2</div></div>
-  <div class="kd-stat"><div class="ring">③</div><div class="label">가상 시연기업</div><div class="value">2</div></div>
-  <div class="kd-stat"><div class="ring">④</div><div class="label">파일 영구저장</div><div class="value">0</div></div>
+  <div class="kd-stat"><div class="ring">①</div><div class="label">입력</div><div class="value">K-Doctor</div></div>
+  <div class="kd-stat"><div class="ring">②</div><div class="label">핵심①</div><div class="value">과업지시서</div></div>
+  <div class="kd-stat"><div class="ring">③</div><div class="label">핵심②</div><div class="value">견적비교</div></div>
+  <div class="kd-stat"><div class="ring">④</div><div class="label">보조</div><div class="value">시스템분석</div></div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -293,8 +295,8 @@ def render_footer() -> None:
     st.markdown(
         """
 <div class="kd-foot">
-  본 화면은 대회 시연용이며 실제 중진공 K-Doctor 서비스가 아닙니다.
-  업로드 자료는 세션 메모리에서만 처리합니다.
+  시연용 MVP입니다. K-Doctor 실데이터 API 연동 전, 합성 진단 결과를 사용합니다.
+  진단 서비스가 아니라 AX 지원 과업지시서·견적비교 업무보조가 목적입니다.
 </div>
 """,
         unsafe_allow_html=True,

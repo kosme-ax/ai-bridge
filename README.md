@@ -1,21 +1,24 @@
 # sme_ai_helper (AI-Bridge)
 
-대전환 챌린지용 **중소기업 AX 도입 도우미** Streamlit MVP입니다.
+대전환 챌린지용 **AX 지원 후속업무** Streamlit MVP입니다.
+
+**진단은 하지 않습니다.** [K-Doctor](https://kdoctor.kosmes.or.kr/main.do?v=f)에서 끝난 기업진단 데이터를 연동 입력으로 받아, 중진공 AX 지원에 필요한 문서를 만듭니다.
+
+### 핵심
+1. **AX 과업지시서 작성**
+2. **공급사 견적 비교**
+
+### 보조
+- K-Doctor 진단 결과 연동(시연: 합성 데이터)
+- 기존 시스템 분석
+- 모델 A/B 비교
 
 - 웹: Streamlit
 - AI: 상용 LLM API 2종 (Solar / Gemini) — `src/config.py`의 `MODELS`로 교체
 - 문서: PDF·DOCX·CSV·XLSX·TXT
-- 데이터: 가상·합성 기업 샘플 (`samples/`)
+- 데이터: K-Doctor 진단 완료를 가정한 가상 기업 (`samples/` + `COMPANIES.kdoctor`)
 - DB 없음, 업로드 비영구 처리
 - GitLab: https://gitlab.aigov.go.kr/kosme2512042/sme_ai_helper
-
-## 시연 기능
-
-1. 기업 AI 도입 진단
-2. 기존 시스템 분석
-3. RFP 자동 생성
-4. 견적 비교 분석
-5. 동일 입력 모델 A/B 비교
 
 ## 로컬 실행
 

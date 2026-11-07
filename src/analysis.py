@@ -39,27 +39,62 @@ JSON 키: summary, duplicate_functions, manual_work, data_silos, legacy_risks, a
     return generate_json(model_name, "systems", prompt, context)
 
 
-def generate_rfp(model_name: str, company: dict[str, Any], diagnosis: dict[str, Any] | None = None) -> dict[str, Any]:
-    context = f"기업: {company}\n진단: {diagnosis or {}}"
-    prompt = f"""키워드: rfp
-AI 도입 사업 RFP 초안을 작성하십시오. 시장가격을 만들지 마십시오.
+def generate_work_order(
+    model_name: str,
+    company: dict[str, Any],
+    diagnosis: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """AX 지원용 과업지시서(핵심 산출물). 진단은 입력, 본 함수가 본업."""
+    kdoctor = company.get("kdoctor") or {}
+    context = (
+        f"기업: {company}\n"
+        f"K-Doctor 진단 연동: {kdoctor}\n"
+        f"추가 진단/분석 결과: {diagnosis or {}}"
+    )
+    prompt = f"""키워드: work_order
+당신은 중진공 AX 지원 담당자의 업무보조 AI입니다.
+K-Doctor 등에서 이미 끝난 '기업진단'을 다시 하지 말고,
+그 결과를 바탕으로 **AX 지원 과업지시서** 초안을 작성하십시오.
+시장가격·임의 단가를 만들지 마십시오.
+
+반드시 강조할 것:
+- 과업 목적, 범위, 산출물, 일정(단계), 역할(발주/수행/검수), 검수기준, 위험·가정
+- 진단 결과에서 도출된 우선 과제와의 연결
 
 {context}
 
-JSON 키: title, summary, sections(객체), human_review_risks
+JSON 키: title, summary, objectives, scope, deliverables, schedule_phases,
+roles, acceptance_criteria, assumptions, linked_diagnosis_points,
+sections(객체), human_review_risks
 """
-    return generate_json(model_name, "rfp", prompt, context)
+    return generate_json(model_name, "work_order", prompt, context)
+
+
+def generate_rfp(
+    model_name: str,
+    company: dict[str, Any],
+    diagnosis: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """하위 호환: 과업지시서 생성으로 위임."""
+    return generate_work_order(model_name, company, diagnosis)
 
 
 def compare_quotations(model_name: str, company: dict[str, Any], quote_text: str) -> dict[str, Any]:
-    context = f"기업: {company.get('name')}\n견적자료:\n{quote_text[:14000]}"
+    context = (
+        f"기업: {company.get('name')}\n"
+        f"K-Doctor 연계 우선과제: {(company.get('kdoctor') or {}).get('priority_tasks')}\n"
+        f"견적자료:\n{quote_text[:14000]}"
+    )
     prompt = f"""키워드: quotation
-견적서를 항목 분류하고 비교 관점을 제시하십시오.
+AX 지원 과업지시서 이행을 위한 공급사 견적을 비교하십시오.
+본 서비스의 핵심 산출물 중 하나입니다.
 단가 차이만으로 부적정이라고 단정하지 마십시오. 확인되지 않은 시장가를 만들지 마십시오.
+과업 범위·산출물·검수기준 관점에서 비교 포인트를 제시하십시오.
 
 {context}
 
-JSON 키: summary, currency, vendors(name,supply_amount,vat_amount,total_amount,notes), comparison_notes, recommendation, human_review_risks
+JSON 키: summary, currency, vendors(name,supply_amount,vat_amount,total_amount,notes),
+scope_fit, comparison_notes, open_questions, recommendation, human_review_risks
 """
     return generate_json(model_name, "quotation", prompt, context)
 
