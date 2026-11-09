@@ -5,7 +5,7 @@
 
 **진단 본업은 K-Doctor**입니다. [AX 자가진단](https://kdoctor.kosmes.or.kr/aiself/ai_intro.do) 결과 보고서를 업로드하거나 같은 흐름으로 **우리 회사 AX 수준**을 확인한 뒤, 표준 RFP·업체·견적·정책으로 이어갑니다.
 
-### 실행 순서 (상단 메뉴)
+### 실행 순서 (상단 메뉴만)
 **기초체력 → 과업지시서 → 업체 → 견적 → 정책**
 
 1. **기초체력** — 우리 회사 AX 수준 진단  
@@ -16,9 +16,11 @@
 
 시연용 예시 보고서: `samples/한빛정밀_AX자가진단_결과보고서.txt`
 
+사이드바는 없습니다. 시연 기업은 합성 샘플(한빛정밀), 모델은 `DEFAULT_MODEL` / `src/config.py`로만 교체합니다.
+
 ### 대회 규칙 정합
 - 합성·비민감 데이터만 사용 · 업로드 비영구 · DB 없음  
-- Solar / Gemini **모델 교체 가능** (`src/config.py`)  
+- Solar / Gemini / Llama / GPT / EXAONE **코드·환경변수로 교체 가능**  
 - API 키는 secrets/환경변수만 (깃 금지)
 
 ## 로컬 실행
@@ -30,6 +32,8 @@ pip install -r requirements.txt
 cp .env.example .env
 streamlit run app.py
 ```
+
+모델 교체 예: `.env`에 `DEFAULT_MODEL=EXAONE` 및 `EXAONE_API_KEY=...`
 
 ## 배포
 

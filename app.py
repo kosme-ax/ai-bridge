@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from src.analysis import compare_quotations, generate_work_order
-from src.config import MODELS, model_status, runtime_settings
+from src.config import runtime_settings
 from src.docs import load_sample, read_upload
 from src.fitness import (
     AI_AREAS,
@@ -75,38 +75,20 @@ def apply_pending_nav() -> None:
         st.session_state.page = st.session_state.pop("_nav_page")
 
 
-def sidebar() -> tuple[str, dict]:
-    with st.sidebar:
-        st.markdown("**sme-ax-helper**")
-        st.caption("AX 지원 후속업무 도우미")
+def active_model() -> str:
+    """모델은 UI가 아니라 DEFAULT_MODEL / src/config.py MODELS로만 교체."""
+    settings = runtime_settings()
+    name = settings["default_model"]
+    st.session_state.model_name = name
+    return name
 
-        company_key = st.selectbox("기업", list(COMPANIES.keys()), label_visibility="collapsed")
-        st.session_state.company_key = company_key
-        company = COMPANIES[company_key]
-        kd = company.get("kdoctor") or {}
-        st.caption(f"{company['name']} · {kd.get('status', '')}")
 
-        model_name = st.selectbox(
-            "모델",
-            options=list(MODELS.keys()),
-            index=list(MODELS.keys()).index(st.session_state.model_name)
-            if st.session_state.model_name in MODELS
-            else 0,
-        )
-        st.session_state.model_name = model_name
-        status = model_status(model_name)
-        st.caption(("live" if status["live"] else "mock") + f" · {status['model']}")
-
-        fit = st.session_state.get("fitness")
-        if fit:
-            st.caption(f"기초체력 {fit['label']} · {fit['total']}/{fit['max_score']}")
-
-        with st.expander("안내"):
-            st.write(
-                "상단 메뉴로 이동: 기초체력 → 과업지시서 → 업체 → 견적 → 정책. "
-                "시연은 합성 데이터만 사용합니다."
-            )
-    return model_name, company
+def active_company() -> dict:
+    key = st.session_state.get("company_key") or "한빛정밀"
+    if key not in COMPANIES:
+        key = next(iter(COMPANIES))
+        st.session_state.company_key = key
+    return COMPANIES[key]
 
 
 def company_form(company: dict, key_prefix: str) -> dict:
@@ -574,7 +556,8 @@ def main() -> None:
     init_state()
     apply_pending_nav()
     inject_styles()
-    model_name, company = sidebar()
+    model_name = active_model()
+    company = active_company()
 
     current = st.session_state.get("page", STEPS[0])
     if current not in PAGES:

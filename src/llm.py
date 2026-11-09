@@ -188,7 +188,7 @@ def _mock_payload(task: str, context: str) -> dict[str, Any]:
     }
 
 
-def _call_upstage(
+def _call_openai_compatible(
     cfg: dict[str, Any],
     prompt: str,
     *,
@@ -196,8 +196,13 @@ def _call_upstage(
     messages: list[dict[str, str]] | None = None,
     temperature: float = 0.2,
 ) -> str:
+    """OpenAI Chat Completions 호환 (Solar / OpenRouter Llama / GPT / EXAONE)."""
     url = f"{cfg['base_url'].rstrip('/')}/chat/completions"
     headers = {"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"}
+    # OpenRouter 권장 헤더(없어도 동작하는 경우 많음)
+    if "openrouter.ai" in str(cfg.get("base_url") or ""):
+        headers["HTTP-Referer"] = "https://sme-ai-helper.streamlit.app"
+        headers["X-Title"] = "sme-ax-helper"
     msgs = messages or [
         {"role": "system", "content": system},
         {"role": "user", "content": prompt},
@@ -212,6 +217,20 @@ def _call_upstage(
         resp.raise_for_status()
         data = resp.json()
     return data["choices"][0]["message"]["content"]
+
+
+def _call_upstage(
+    cfg: dict[str, Any],
+    prompt: str,
+    *,
+    system: str = SYSTEM,
+    messages: list[dict[str, str]] | None = None,
+    temperature: float = 0.2,
+) -> str:
+    """하위 호환 별칭."""
+    return _call_openai_compatible(
+        cfg, prompt, system=system, messages=messages, temperature=temperature
+    )
 
 
 def _call_google(
@@ -274,12 +293,14 @@ def generate_chat(
         return "API 키가 없어 상담 Mock만 가능합니다. Secrets에 키를 넣으면 더 자세히 답합니다."
 
     try:
-        if cfg["provider"] == "upstage":
+        if cfg["provider"] in {"openai_compatible", "upstage"}:
             messages = [{"role": "system", "content": system}]
             for m in history[-8:]:
                 messages.append({"role": m["role"], "content": m["content"]})
             messages.append({"role": "user", "content": prompt})
-            return _call_upstage(cfg, prompt, system=system, messages=messages, temperature=0.4)
+            return _call_openai_compatible(
+                cfg, prompt, system=system, messages=messages, temperature=0.4
+            )
         if cfg["provider"] == "google":
             return _call_google(
                 cfg,
@@ -314,8 +335,8 @@ def generate_json(model_name: str, task: str, prompt: str, context: str = "") ->
         return payload
 
     try:
-        if cfg["provider"] == "upstage":
-            content = _call_upstage(cfg, prompt)
+        if cfg["provider"] in {"openai_compatible", "upstage"}:
+            content = _call_openai_compatible(cfg, prompt)
         elif cfg["provider"] == "google":
             content = _call_google(cfg, prompt)
         else:

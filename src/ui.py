@@ -19,9 +19,15 @@ html, body, [class*="css"] {
 
 [data-testid="stHeader"] { background: transparent; }
 
-[data-testid="stSidebar"] {
-  background: #FFFFFF;
-  border-right: 1px solid #E5E8EB;
+/* 시연용 사이드바 제거 — 모델·기업은 코드/환경변수 */
+[data-testid="stSidebar"],
+section[data-testid="stSidebar"],
+[data-testid="stSidebarCollapsedControl"],
+button[kind="headerNoPadding"] {
+  display: none !important;
+}
+[data-testid="stAppViewContainer"] {
+  margin-left: 0 !important;
 }
 
 .block-container {
