@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from functools import lru_cache
 from typing import Any
 
 from dotenv import load_dotenv
@@ -60,23 +59,34 @@ MODELS: dict[str, dict[str, str]] = {
 
 
 def _secret(name: str, default: str = "") -> str:
-    """환경변수 → Streamlit secrets 순으로 조회. 키를 코드에 박지 않는다."""
-    env_val = os.getenv(name, "").strip()
-    if env_val:
-        return env_val
+    """Cloud Secrets 우선 → 환경변수(.env) → default. 캐시하지 않는다."""
     try:
         import streamlit as st
 
-        if hasattr(st, "secrets") and name in st.secrets:
-            value = st.secrets.get(name)
+        secrets = getattr(st, "secrets", None)
+        if secrets is not None:
+            try:
+                value = secrets[name]
+            except Exception:
+                value = None
             if value is not None and str(value).strip():
-                return str(value).strip()
+                return str(value).strip().strip('"').strip("'")
     except Exception:
         pass
+    env_val = os.getenv(name, "").strip().strip('"').strip("'")
+    if env_val:
+        return env_val
     return (default or "").strip()
 
 
-@lru_cache
+def _resolve_model_name(raw: str) -> str:
+    name = (raw or "").strip().strip('"').strip("'")
+    if name in MODELS:
+        return name
+    lower = {k.lower(): k for k in MODELS}
+    return lower.get(name.lower(), "")
+
+
 def runtime_settings() -> dict[str, Any]:
     models: dict[str, dict[str, Any]] = {}
     for name, spec in MODELS.items():
@@ -87,7 +97,7 @@ def runtime_settings() -> dict[str, Any]:
             "base_url": _secret(spec["url_env"], spec["base_url_default"]),
             "api_key": _secret(spec["key_env"]),
         }
-    default = _secret("DEFAULT_MODEL", "Solar")
+    default = _resolve_model_name(_secret("DEFAULT_MODEL", "Solar"))
     if default not in models:
         default = next(iter(models))
     return {"models": models, "default_model": default}
