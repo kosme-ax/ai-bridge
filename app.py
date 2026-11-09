@@ -23,7 +23,7 @@ from src.ui import inject_styles, page_header, policy_card, render_footer, soft_
 from src.vendors import VENDORS, recommend_vendors
 
 st.set_page_config(
-    page_title="AI-Bridge",
+    page_title="sme-ax-helper",
     page_icon="💠",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -77,8 +77,8 @@ def apply_pending_nav() -> None:
 
 def sidebar() -> tuple[str, dict]:
     with st.sidebar:
-        st.markdown("**AI-Bridge**")
-        st.caption("AX 지원 문서 도우미")
+        st.markdown("**sme-ax-helper**")
+        st.caption("AX 지원 후속업무 도우미")
 
         company_key = st.selectbox("기업", list(COMPANIES.keys()), label_visibility="collapsed")
         st.session_state.company_key = company_key

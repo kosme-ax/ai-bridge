@@ -76,7 +76,7 @@ POLICIES: list[dict[str, Any]] = [
         "category": "진단·연계",
         "summary": (
             "온라인 기업진단으로 경영·역량 수준을 점검하고 솔루션 방향을 제공합니다. "
-            "AI-Bridge는 진단 이후 과업지시서·견적비교로 이어줍니다."
+            "sme-ax-helper는 진단 이후 과업지시서·견적비교로 이어줍니다."
         ),
         "period": "상시 (서비스 운영 기간)",
         "apply": "K-Doctor 누리집 회원가입 후 AI진단·AX자가진단 진행",

@@ -1,4 +1,4 @@
-# GitLab 보안 템플릿 + AI-Bridge 테스트
+# GitLab 보안 템플릿 + sme-ax-helper 테스트
 # SAST: https://docs.gitlab.com/user/application_security/sast/
 # Secret Detection: https://docs.gitlab.com/user/application_security/secret_detection/
 
@@ -45,7 +45,7 @@ docker-build:
   services:
     - docker:24-dind
   script:
-    - docker build -t ai-bridge:$CI_COMMIT_SHORT_SHA .
+    - docker build -t sme-ax-helper:$CI_COMMIT_SHORT_SHA .
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual

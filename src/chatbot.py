@@ -8,8 +8,8 @@ from typing import Any
 from src.llm import generate_chat
 from src.policies import POLICIES, recommend_policies
 
-CHAT_SYSTEM = """당신은 AI-Bridge 상담 도우미입니다.
-중진공 AX 지원 업무를 돕는 Streamlit 앱의 가이드입니다.
+CHAT_SYSTEM = """당신은 sme-ax-helper 상담 도우미입니다.
+중진공 AX 지원 후속업무를 돕는 Streamlit 앱의 가이드입니다.
 
 앱 실행 순서(반드시 이 순서로 안내):
 1) 기초체력 — 우리 회사 AX 수준 진단: 보고서 업로드 또는 적용 영역·해결 문제·사업/데이터/운영 문항

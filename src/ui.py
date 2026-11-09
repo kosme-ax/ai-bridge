@@ -353,7 +353,7 @@ def render_footer() -> None:
     st.markdown(
         """
 <div class="toss-foot">
-  시연용 · K-Doctor 진단 연동 가정 · 업로드 비저장
+  sme-ax-helper · 시연용 · 업로드 비저장
 </div>
 """,
         unsafe_allow_html=True,
