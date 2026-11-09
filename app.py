@@ -4,7 +4,7 @@ import streamlit as st
 
 from src.analysis import compare_quotations, generate_work_order
 from src.config import runtime_settings
-from src.docs import load_sample, read_upload
+from src.docs import read_upload
 from src.fitness import (
     AI_AREAS,
     INDUSTRIES,
@@ -18,7 +18,7 @@ from src.fitness import (
 )
 from src.policies import POLICIES, recommend_policies
 from src.reports import RFP_SECTION_ORDER, to_docx_bytes, to_pdf_bytes
-from src.sample_data import COMPANIES, sample_files
+from src.sample_data import COMPANIES
 from src.ui import inject_styles, page_header, policy_card, render_footer, soft_card, vendor_card
 from src.vendors import VENDORS, recommend_vendors
 
@@ -92,32 +92,33 @@ def active_company() -> dict:
 
 
 def company_form(company: dict, key_prefix: str) -> dict:
-    name = st.text_input("기업명", company["name"], key=f"{key_prefix}_name")
-    industry = st.text_input("업종", company["industry"], key=f"{key_prefix}_industry")
+    """입력칸은 비워 두고, 시연·현장에서 직접 기입. company는 폴백용."""
+    name = st.text_input("기업명", value="", placeholder="예: 한빛정밀", key=f"{key_prefix}_name")
+    industry = st.text_input("업종", value="", placeholder="예: 제조업", key=f"{key_prefix}_industry")
     employees = st.number_input(
         "인원",
         min_value=1,
-        value=int(company["employees"]),
+        value=1,
         key=f"{key_prefix}_employees",
     )
     with st.expander("상세 정보", expanded=False):
         main_tasks = st.text_area(
-            "주요 업무", company["main_tasks"], height=70, key=f"{key_prefix}_main_tasks"
+            "주요 업무", value="", height=70, key=f"{key_prefix}_main_tasks"
         )
         it_summary = st.text_area(
-            "IT 현황", company["it_summary"], height=70, key=f"{key_prefix}_it_summary"
+            "IT 현황", value="", height=70, key=f"{key_prefix}_it_summary"
         )
         pain_points = st.text_area(
-            "고충", company["pain_points"], height=70, key=f"{key_prefix}_pain_points"
+            "고충", value="", height=70, key=f"{key_prefix}_pain_points"
         )
 
     return {
-        "name": name,
-        "industry": industry,
-        "employees": employees,
-        "main_tasks": main_tasks,
-        "it_summary": it_summary,
-        "pain_points": pain_points,
+        "name": name or company.get("name", ""),
+        "industry": industry or company.get("industry", ""),
+        "employees": int(employees) if employees else int(company.get("employees") or 1),
+        "main_tasks": main_tasks or company.get("main_tasks", ""),
+        "it_summary": it_summary or company.get("it_summary", ""),
+        "pain_points": pain_points or company.get("pain_points", ""),
         "kdoctor": company.get("kdoctor") or {},
         "fitness": st.session_state.get("fitness"),
     }
@@ -402,31 +403,16 @@ def page_fitness() -> None:
         return
 
     if st.session_state.fit_path == "report":
-        sample_path = sample_files()["AX 자가진단 보고서"]
-        use_sample = st.toggle("샘플 보고서", value=True, key="fit_report_sample")
+        uploaded = st.file_uploader(
+            "결과 보고서",
+            type=["txt", "md", "pdf", "docx"],
+            key="fit_report_up",
+        )
         report_text = ""
         report_name = ""
-        if use_sample and sample_path.exists():
-            report_text = load_sample(sample_path)
-            report_name = sample_path.name
-            with st.expander("미리보기"):
-                st.text(report_text[:1200])
-                st.download_button(
-                    "예시 파일",
-                    data=sample_path.read_bytes(),
-                    file_name=sample_path.name,
-                    mime="text/plain",
-                    key="dl_ax_report_sample",
-                )
-        else:
-            uploaded = st.file_uploader(
-                "결과 보고서",
-                type=["txt", "md", "pdf", "docx"],
-                key="fit_report_up",
-            )
-            if uploaded:
-                report_name = uploaded.name
-                report_text = read_upload(uploaded.name, uploaded.getvalue())
+        if uploaded:
+            report_name = uploaded.name
+            report_text = read_upload(uploaded.name, uploaded.getvalue())
 
         if st.button("기초체력 산출", type="primary", use_container_width=True, key="fit_report_run"):
             if not report_text.strip():
@@ -510,24 +496,17 @@ def page_vendors(company: dict) -> None:
 
 
 def page_quotes(model_name: str, company: dict) -> None:
-    page_header("견적", "견적을<br>비교해요", "샘플 또는 파일을 넣으세요.")
+    page_header("견적", "견적을<br>비교해요", "견적 파일을 올려 주세요.")
+    uploads = st.file_uploader(
+        "견적 파일",
+        type=["txt", "csv", "xlsx", "pdf", "docx"],
+        accept_multiple_files=True,
+        key="quote_up",
+    )
     parts = []
-    use_sample = st.toggle("샘플 견적", value=True, key="quote_sample")
-    if use_sample:
-        for key in ("견적 A", "견적 B"):
-            path = sample_files()[key]
-            if path.exists():
-                parts.append(f"# {key}\n{load_sample(path)}")
-    else:
-        uploads = st.file_uploader(
-            "견적 파일",
-            type=["txt", "csv", "xlsx", "pdf", "docx"],
-            accept_multiple_files=True,
-            key="quote_up",
-        )
-        for f in uploads or []:
-            raw = f.getvalue()
-            parts.append(f"# {f.name}\n{read_upload(f.name, raw)}")
+    for f in uploads or []:
+        raw = f.getvalue()
+        parts.append(f"# {f.name}\n{read_upload(f.name, raw)}")
 
     if st.button("비교하기", type="primary", use_container_width=True, key="quote_run"):
         quote_text = "\n\n".join(parts)
