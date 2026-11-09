@@ -1,18 +1,9 @@
 from __future__ import annotations
 
-import json
-
 import streamlit as st
 
-from src.analysis import (
-    analyze_systems,
-    compare_models,
-    compare_quotations,
-    diagnose,
-    generate_work_order,
-)
+from src.analysis import compare_quotations, generate_work_order
 from src.config import MODELS, model_status, runtime_settings
-from src.csv_validate import validate_company_metrics
 from src.docs import load_sample, read_upload
 from src.fitness import (
     AI_AREAS,
@@ -40,7 +31,7 @@ st.set_page_config(
 
 # 상단 메뉴 = 단계 이동. 화면 안 다음/이전 CTA는 두지 않음.
 STEPS = ("기초체력", "과업지시서", "업체", "견적", "정책")
-PAGES = STEPS + ("더보기",)
+PAGES = STEPS
 
 _PAGE_ALIASES = {
     "기초체력보기": "기초체력",
@@ -49,6 +40,7 @@ _PAGE_ALIASES = {
     "견적비교": "견적",
     "견적 비교": "견적",
     "정책연계": "정책",
+    "더보기": "기초체력",
 }
 
 
@@ -58,9 +50,6 @@ def init_state() -> None:
     st.session_state.setdefault("last_title", "")
     st.session_state.setdefault("fitness", None)
     st.session_state.setdefault("page", "기초체력")
-    st.session_state.setdefault("more_choice", "CSV 검증")
-    if st.session_state.get("more_choice") == "K-Doctor 연동":
-        st.session_state.more_choice = "보완 진단"
     st.session_state.setdefault("fit_path", None)  # None | report | quiz
     st.session_state.setdefault("fit_step", 0)  # 0 industry, 1 areas, 2 problems, 3+ likert
     st.session_state.setdefault("fit_answers", {})
@@ -75,20 +64,15 @@ def init_state() -> None:
         st.session_state.page = _PAGE_ALIASES[cur]
 
 
-def navigate(page: str, *, more: str | None = None) -> None:
+def navigate(page: str) -> None:
     """위젯 key에 직접 쓰지 말고, 다음 런 시작 전에 적용되도록 예약."""
     st.session_state["_nav_page"] = page
-    if more is not None:
-        st.session_state["_nav_more"] = more
     st.rerun()
 
 
 def apply_pending_nav() -> None:
-    """radio(key=page/more_choice) 생성 전에만 호출."""
     if "_nav_page" in st.session_state:
         st.session_state.page = st.session_state.pop("_nav_page")
-    if "_nav_more" in st.session_state:
-        st.session_state.more_choice = st.session_state.pop("_nav_more")
 
 
 def sidebar() -> tuple[str, dict]:
@@ -413,7 +397,11 @@ def _render_quiz_likert(step: int) -> None:
 
 def page_fitness() -> None:
     company = COMPANIES[st.session_state.company_key]
-    page_header("기초체력", "어디에 AI를<br>쓸까요?", "보고서를 올리거나 바로 체크하세요.")
+    page_header(
+        "기초체력",
+        "우리 회사의<br>AX 수준 진단",
+        "K-Doctor 보고서를 올리거나, 같은 흐름으로 바로 체크하세요.",
+    )
 
     if st.session_state.get("fitness"):
         _render_fitness_result(company)
@@ -570,44 +558,6 @@ def page_quotes(model_name: str, company: dict) -> None:
             st.session_state.quotes_done = True
 
 
-def page_csv_validate() -> None:
-    page_header("CSV", "표준인지<br>검사해요", "필수 컬럼·파일명을 확인합니다.")
-    tpl = sample_files()["표준 템플릿"]
-    if tpl.exists():
-        st.download_button(
-            "템플릿",
-            data=tpl.read_bytes(),
-            file_name="템플릿_표준_기업현황.csv",
-            mime="text/csv",
-            use_container_width=True,
-            key="dl_tpl",
-        )
-    use_sample = st.toggle("샘플 검사", value=True, key="metrics_sample")
-    if use_sample:
-        path = sample_files()["표준 기업현황"]
-        data = path.read_bytes()
-        name = path.name
-    else:
-        uploaded = st.file_uploader("CSV/XLSX", type=["csv", "xlsx"], key="metrics_up")
-        if not uploaded:
-            return
-        data = uploaded.getvalue()
-        name = uploaded.name
-    if st.button("검사", type="primary", use_container_width=True, key="metrics_run"):
-        st.session_state["csv_report"] = validate_company_metrics(name, data)
-    report = st.session_state.get("csv_report")
-    if not report:
-        return
-    if report["ok"]:
-        st.success(f"통과 · {report['row_count']}행")
-    else:
-        st.error("미통과")
-        for issue in report["issues"]:
-            st.write(f"- {issue}")
-    if report.get("preview") is not None:
-        st.dataframe(report["preview"], use_container_width=True)
-
-
 def page_policies(company: dict) -> None:
     st.session_state.policies_viewed = True
     page_header("정책", "맞는 정책을<br>이어가요", "공식 공고를 확인하세요.")
@@ -618,69 +568,6 @@ def page_policies(company: dict) -> None:
             item["why"] = "카탈로그"
             policy_card(item)
             st.link_button("바로가기", p["apply_url"], use_container_width=True, key=f"pol_a_{i}")
-
-
-def page_more(model_name: str, company: dict) -> None:
-    choice = st.radio(
-        "선택",
-        ("CSV 검증", "시스템 분석", "모델 비교", "보완 진단"),
-        horizontal=True,
-        label_visibility="collapsed",
-        key="more_choice",
-    )
-    if choice == "CSV 검증":
-        page_csv_validate()
-        return
-
-    page_header("더보기", "필요할 때만<br>쓰세요", "")
-
-    if choice == "보완 진단":
-        profile = company_form(company, "diag")
-        if st.checkbox("합성 메모", value=True, key="diag_sample"):
-            path = sample_files()["진단 메모"]
-            extra = load_sample(path) if path.exists() else ""
-        else:
-            extra = ""
-        if st.button("실행", type="primary", use_container_width=True, key="diag_run"):
-            with st.spinner("실행 중…"):
-                result = diagnose(model_name, profile, extra)
-            show_result("보완진단", result)
-    elif choice == "시스템 분석":
-        doc_text = ""
-        if st.toggle("샘플", value=True, key="sys_sample"):
-            path = sample_files()["시스템 목록"]
-            if path.exists():
-                doc_text = load_sample(path)
-        else:
-            uploaded = st.file_uploader(
-                "문서",
-                type=["txt", "pdf", "docx", "csv", "xlsx"],
-                key="sys_up",
-            )
-            if uploaded:
-                doc_text = read_upload(uploaded.name, uploaded.getvalue())
-        if st.button("분석", type="primary", use_container_width=True, key="sys_run"):
-            if not doc_text.strip():
-                st.warning("문서가 없습니다.")
-            else:
-                with st.spinner("분석 중…"):
-                    result = analyze_systems(model_name, company, doc_text)
-                show_result("시스템분석", result)
-    else:
-        names = list(MODELS.keys())
-        a = st.selectbox("모델 A", names, index=0, key="cmp_a")
-        b = st.selectbox("모델 B", names, index=min(1, len(names) - 1), key="cmp_b")
-        question = st.text_input("질문", "우선 과업 3가지와 검수기준을 제시해 주세요.", key="cmp_q")
-        if st.button("비교", type="primary", use_container_width=True, key="cmp_run"):
-            with st.spinner("비교 중…"):
-                result = compare_models(a, b, company, question)
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown(f"**{result['model_a']['name']}**")
-                st.write((result["model_a"]["result"] or {}).get("summary"))
-            with c2:
-                st.markdown(f"**{result['model_b']['name']}**")
-                st.write((result["model_b"]["result"] or {}).get("summary"))
 
 
 def main() -> None:
@@ -713,10 +600,8 @@ def main() -> None:
         page_vendors(company)
     elif page == "견적":
         page_quotes(model_name, company)
-    elif page == "정책":
-        page_policies(company)
     else:
-        page_more(model_name, company)
+        page_policies(company)
 
     render_footer()
 
