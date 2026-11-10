@@ -34,7 +34,7 @@ app-test:
     - source .venv/bin/activate
     - pip install -r requirements.txt
     - python -c "from src.config import MODELS; assert 'Solar' in MODELS and 'Gemini' in MODELS"
-    - python -c "from src.llm import generate_json; r=generate_json('Solar','diagnosis','키워드: diagnosis\n테스트', '한빛'); assert 'summary' in r"
+    - python -c "from src.llm import generate_json; r=generate_json('Solar','work_order','키워드: work_order\n테스트', '한빛'); assert 'summary' in r"
   rules:
     - if: $CI_PIPELINE_SOURCE
 

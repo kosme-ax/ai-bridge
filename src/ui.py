@@ -180,116 +180,12 @@ div[data-baseweb="select"] > div {
   line-height: 1.45;
   margin: 0;
 }
-.toss-steps {
-  display: flex;
-  gap: 0;
-  margin: 0 0 1.75rem;
-  padding: 0.85rem 0.5rem 1rem;
-  background: #FFFFFF;
-  border: 1px solid #E5E8EB;
-  border-radius: 20px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-.toss-step {
-  flex: 1 1 0;
-  min-width: 4.4rem;
-  text-align: center;
-  position: relative;
-  padding: 0 0.2rem;
-}
-.toss-step:not(:last-child)::after {
-  content: "";
-  position: absolute;
-  top: 14px;
-  left: calc(50% + 16px);
-  width: calc(100% - 32px);
-  height: 2px;
-  background: #E5E8EB;
-}
-.toss-step.done:not(:last-child)::after,
-.toss-step.active:not(:last-child)::after {
-  background: #3182F6;
-}
-.toss-step-num {
-  width: 28px;
-  height: 28px;
-  margin: 0 auto 0.4rem;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.78rem;
-  font-weight: 800;
-  background: #F2F4F6;
-  color: #8B95A1;
-  position: relative;
-  z-index: 1;
-}
-.toss-step.active .toss-step-num {
-  background: #3182F6;
-  color: #FFFFFF;
-}
-.toss-step.done .toss-step-num {
-  background: #E8F3FF;
-  color: #3182F6;
-}
-.toss-step-label {
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: #B0B8C1;
-  line-height: 1.3;
-  letter-spacing: -0.02em;
-}
-.toss-step.active .toss-step-label {
-  color: #191F28;
-  font-weight: 800;
-}
-.toss-step.done .toss-step-label {
-  color: #4E5968;
-}
-.toss-step-now {
-  display: inline-block;
-  margin: 0 0 0.85rem;
-  padding: 0.28rem 0.65rem;
-  border-radius: 999px;
-  background: #E8F3FF;
-  color: #3182F6;
-  font-size: 0.78rem;
-  font-weight: 700;
-}
 </style>
 """
 
 
 def inject_styles() -> None:
     st.markdown(STYLES, unsafe_allow_html=True)
-
-
-def render_stepper(steps: list[str], current: str, done: set[str] | None = None) -> None:
-    """토스식 상단 진행 스텝. current가 steps에 없으면(더보기 등) 하이라이트만 생략."""
-    done = done or set()
-    cells = []
-    for i, name in enumerate(steps, start=1):
-        cls = "toss-step"
-        if name == current:
-            cls += " active"
-        elif name in done:
-            cls += " done"
-        mark = "✓" if name in done and name != current else str(i)
-        cells.append(
-            f'<div class="{cls}">'
-            f'<div class="toss-step-num">{mark}</div>'
-            f'<div class="toss-step-label">{name}</div>'
-            f"</div>"
-        )
-    st.markdown(f'<div class="toss-steps">{"".join(cells)}</div>', unsafe_allow_html=True)
-    if current in steps:
-        idx = steps.index(current) + 1
-        st.markdown(
-            f'<div class="toss-step-now">STEP {idx} / {len(steps)} · {current}</div>',
-            unsafe_allow_html=True,
-        )
 
 
 def page_header(eyebrow: str, title: str, sub: str = "") -> None:

@@ -31,7 +31,6 @@ st.set_page_config(
 
 # 상단 메뉴 = 단계 이동. 화면 안 다음/이전 CTA는 두지 않음.
 STEPS = ("기초체력", "과업지시서", "업체", "견적", "정책")
-PAGES = STEPS
 
 _PAGE_ALIASES = {
     "기초체력보기": "기초체력",
@@ -62,17 +61,6 @@ def init_state() -> None:
     cur = st.session_state.get("page")
     if cur in _PAGE_ALIASES:
         st.session_state.page = _PAGE_ALIASES[cur]
-
-
-def navigate(page: str) -> None:
-    """위젯 key에 직접 쓰지 말고, 다음 런 시작 전에 적용되도록 예약."""
-    st.session_state["_nav_page"] = page
-    st.rerun()
-
-
-def apply_pending_nav() -> None:
-    if "_nav_page" in st.session_state:
-        st.session_state.page = st.session_state.pop("_nav_page")
 
 
 def active_model() -> str:
@@ -435,11 +423,6 @@ def page_fitness() -> None:
             st.rerun()
         return
 
-    if st.session_state.fit_path == "kdoctor":
-        st.session_state.fit_path = "report"
-        st.rerun()
-        return
-
     step = int(st.session_state.fit_step)
     if step >= TOTAL_QUIZ_STEPS:
         _finish_quiz()
@@ -533,20 +516,19 @@ def page_policies(company: dict) -> None:
 
 def main() -> None:
     init_state()
-    apply_pending_nav()
     inject_styles()
     model_name = active_model()
     company = active_company()
 
     current = st.session_state.get("page", STEPS[0])
-    if current not in PAGES:
+    if current not in STEPS:
         current = STEPS[0]
         st.session_state.page = current
 
     page = st.pills(
         "메뉴",
-        options=list(PAGES),
-        default=current if current in PAGES else STEPS[0],
+        options=list(STEPS),
+        default=current if current in STEPS else STEPS[0],
         key="page",
         label_visibility="collapsed",
     )

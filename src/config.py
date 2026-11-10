@@ -58,21 +58,26 @@ MODELS: dict[str, dict[str, str]] = {
 }
 
 
-def _secret(name: str, default: str = "") -> str:
-    """Cloud Secrets 우선 → 환경변수(.env) → default. 캐시하지 않는다."""
+def _streamlit_secret(name: str) -> str:
+    """이미 로드된 Streamlit에서만 secrets 조회 (CLI에서 streamlit import 금지)."""
+    import sys
+
+    if "streamlit" not in sys.modules:
+        return ""
     try:
         import streamlit as st
 
-        secrets = getattr(st, "secrets", None)
-        if secrets is not None:
-            try:
-                value = secrets[name]
-            except Exception:
-                value = None
-            if value is not None and str(value).strip():
-                return str(value).strip().strip('"').strip("'")
+        value = st.secrets[name]
+        return str(value).strip().strip('"').strip("'") if value is not None else ""
     except Exception:
-        pass
+        return ""
+
+
+def _secret(name: str, default: str = "") -> str:
+    """Cloud Secrets 우선 → 환경변수(.env) → default."""
+    secret_val = _streamlit_secret(name)
+    if secret_val:
+        return secret_val
     env_val = os.getenv(name, "").strip().strip('"').strip("'")
     if env_val:
         return env_val
@@ -101,16 +106,3 @@ def runtime_settings() -> dict[str, Any]:
     if default not in models:
         default = next(iter(models))
     return {"models": models, "default_model": default}
-
-
-def model_status(name: str) -> dict[str, Any]:
-    cfg = runtime_settings()["models"][name]
-    live = bool(cfg.get("api_key"))
-    return {
-        "name": name,
-        "label": cfg.get("label", name),
-        "provider": cfg["provider"],
-        "model": cfg["model"],
-        "live": live,
-        "mode": "live" if live else "mock",
-    }

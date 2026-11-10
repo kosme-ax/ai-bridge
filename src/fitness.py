@@ -8,11 +8,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable
+from typing import Any
 
 KDOCTOR_LOGIN = "https://kdoctor.kosmes.or.kr/registn2/login.do"
 KDOCTOR_AX_INTRO = "https://kdoctor.kosmes.or.kr/aiself/ai_intro.do"
-KDOCTOR_MAIN = "https://kdoctor.kosmes.or.kr/main.do?v=f"
 
 INDUSTRIES = ("제조업", "바이오헬스", "유통물류업", "서비스업")
 
@@ -191,9 +190,6 @@ LIKERT_QUESTIONS: list[dict[str, Any]] = [
     },
 ]
 
-# 하위 호환 이름 (앱·문서에서 QUESTION_BANK 참조)
-QUESTION_BANK = LIKERT_QUESTIONS
-
 EDUCATION_LINKS: list[dict[str, str]] = [
     {"title": "K-Doctor AX 자가진단 시작", "url": KDOCTOR_AX_INTRO, "when": "all"},
     {"title": "K-Doctor 로그인·회원가입", "url": KDOCTOR_LOGIN, "when": "all"},
@@ -236,33 +232,6 @@ def likert_at(index: int) -> dict[str, Any]:
         "index": index,
         "total": len(LIKERT_QUESTIONS),
     }
-
-
-def question_at(index: int, difficulty: str = "normal") -> dict[str, Any]:
-    """하위 호환: 리커트 문항 반환 (difficulty 무시)."""
-    _ = difficulty
-    return likert_at(index)
-
-
-def update_difficulty(current: str, last_score: int) -> str:
-    """하위 호환 — AX 자가진단은 고정 척도라 난이도 변경 없음."""
-    _ = last_score
-    return current or "normal"
-
-
-def adapt_question_with_ai(
-    question: dict[str, Any],
-    *,
-    previous_answers: list[dict[str, Any]],
-    company_name: str,
-    model_name: str,
-    chat_fn: Callable[..., str] | None = None,
-) -> dict[str, Any]:
-    """원문 문항 유지가 원칙. AI는 짧은 안내 문구만 다듬을 때 사용."""
-    if chat_fn is None:
-        return question
-    _ = (previous_answers, company_name, model_name)
-    return question
 
 
 def _focus_tip(areas: list[str], problems: list[str], level: str) -> str:
@@ -497,31 +466,3 @@ def fitness_from_report(text: str, company: dict[str, Any]) -> dict[str, Any]:
     if areas and "AI 적용" not in str(result.get("tip", "")):
         result["tip"] = f"AI 적용 희망: {' · '.join(areas)}. {result['tip']}"
     return result
-
-
-def fitness_from_kdoctor(kdoctor: dict[str, Any], company: dict[str, Any]) -> dict[str, Any]:
-    """하위 호환: 합성 kdoctor dict → 보고서 파서와 동일 결과 형태로."""
-    df = kdoctor.get("data_fitness") or {}
-
-    def up(v: int, lo: int = 1, hi: int = 5) -> int:
-        return max(lo, min(hi, int(v) * 2 + 1))
-
-    blob = "\n".join(
-        [
-            f"진단ID: {kdoctor.get('diagnosis_id', '')}",
-            f"업종: {kdoctor.get('industry') or company.get('industry') or ''}",
-            f"AX수준: {kdoctor.get('ax_level', '')}",
-            f"AI적용영역: {', '.join(kdoctor.get('ai_areas') or [])}",
-            f"해결문제: {', '.join(kdoctor.get('ai_problems') or [])}",
-            f"요약: {kdoctor.get('summary', '')}",
-            "우선과제:",
-            *[f"- {t}" for t in (kdoctor.get("priority_tasks") or [])],
-            f"q4: {up(int(df.get('ax_mindset', 1)))}",
-            f"q10: {up(int(df.get('digital_record', 1)))}",
-            f"q11: {up(int(df.get('shopfloor_data', 1)))}",
-            f"q16: {up(int(df.get('data_plan', 1)))}",
-            f"q17: {min(4, up(int(df.get('template_std', 1))))}",
-            f"q22: {up(int(df.get('naming', 1)))}",
-        ]
-    )
-    return fitness_from_report(blob, company)

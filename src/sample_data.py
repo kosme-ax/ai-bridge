@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-SAMPLES = ROOT / "samples"
-
 # K-Doctor(기업진단) 완료 기업을 가정한 합성 연동 데이터.
 # 실제 API 연동 전 시연용이며, 본 앱의 핵심은 진단 자체가 아니라
 # 진단 결과를 받아 AX 지원 과업지시서·견적 비교로 이어가는 후속 업무다.
@@ -38,7 +33,6 @@ COMPANIES = {
                 "ERP-현장 데이터 연계 과업 명세",
                 "월마감 자동화 PoC 과업지시서 작성",
             ],
-            # 기초체력 매핑용 합성 점수 (0~2 → 자가진단 척도 변환)
             "data_fitness": {
                 "digital_record": 2,
                 "customer_data": 1,
@@ -93,15 +87,3 @@ COMPANIES = {
         },
     },
 }
-
-
-def sample_files() -> dict[str, Path]:
-    return {
-        "진단 메모": SAMPLES / "hanbit_diagnosis.txt",
-        "AX 자가진단 보고서": SAMPLES / "한빛정밀_AX자가진단_결과보고서.txt",
-        "시스템 목록": SAMPLES / "hanbit_systems.csv",
-        "견적 A": SAMPLES / "quote_a.csv",
-        "견적 B": SAMPLES / "quote_b.csv",
-        "표준 기업현황": SAMPLES / "한빛정밀_AX지원_기업현황.csv",
-        "표준 템플릿": SAMPLES / "템플릿_표준_기업현황.csv",
-    }
