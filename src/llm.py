@@ -201,7 +201,7 @@ def _call_openai_compatible(
     headers = {"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"}
     # OpenRouter 권장 헤더(없어도 동작하는 경우 많음)
     if "openrouter.ai" in str(cfg.get("base_url") or ""):
-        headers["HTTP-Referer"] = "https://sme-ai-helper.streamlit.app"
+        headers["HTTP-Referer"] = "https://sme-ax.streamlit.app"
         headers["X-Title"] = "sme-ax-helper"
     msgs = messages or [
         {"role": "system", "content": system},

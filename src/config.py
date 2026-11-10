@@ -21,7 +21,7 @@ MODELS: dict[str, dict[str, str]] = {
     },
     "Gemini": {
         "provider": "google",
-        "model": "gemini-2.0-flash",
+        "model": "gemini-3.8-flash",
         "label": "Google Gemini",
         "base_url_default": "https://generativelanguage.googleapis.com/v1beta",
         "key_env": "GEMINI_API_KEY",
