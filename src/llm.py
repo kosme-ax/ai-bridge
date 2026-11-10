@@ -85,6 +85,29 @@ def _mock_payload(task: str, context: str) -> dict[str, Any]:
             ],
             "recommendation": "범위가 동일한지 확인한 뒤 기술·보안·유지보수 항목을 우선 비교하십시오.",
         }
+    if task == "vendors":
+        return {
+            **base,
+            "summary": f"{company} 적용 영역·고충에 맞춰 카탈로그 공급사를 Mock 추천했습니다.",
+            "recommendations": [
+                {"id": "ato", "score": 9, "why": "품질·비전 검사 PoC에 적합"},
+                {"id": "runup", "score": 8, "why": "MES·ERP 연계·공정 자동화에 적합"},
+                {"id": "twim", "score": 7, "why": "제조 외관검사 레퍼런스가 많음"},
+                {"id": "upstage", "score": 6, "why": "문서·LLM 업무자동화 후보"},
+                {"id": "bizarim", "score": 6, "why": "MES·제조 AI 연계 후보"},
+                {"id": "intelliz", "score": 5, "why": "중소 제조 보급형 비전 후보"},
+            ],
+        }
+    if task == "policies":
+        return {
+            **base,
+            "summary": f"{company} AX 후속 실행에 맞는 정책·자금을 Mock 추천했습니다.",
+            "recommendations": [
+                {"id": "tech_finance", "score": 9, "why": "설비·시스템 도입 자금이 필요할 때"},
+                {"id": "smart_factory_loan", "score": 8, "why": "스마트화·ICT 설비와 맞음"},
+                {"id": "regional_ai", "score": 7, "why": "지역 AI·AX 지원 사업과 연계"},
+            ],
+        }
 
     areas = "품질관리 · 공정/설비"
     problems = "외관·치수 검사 숙련 의존 / 공정 병목 원인 파악 어려움"
@@ -184,15 +207,18 @@ def _call_openai_compatible(
     if "openrouter.ai" in str(cfg.get("base_url") or ""):
         headers["HTTP-Referer"] = "https://sme-ax.streamlit.app"
         headers["X-Title"] = "sme-ax-helper"
-    body = {
+    # EXAONE 등 느린 응답 대비: 읽기 타임아웃을 넉넉히, 출력 상한 지정
+    body: dict[str, Any] = {
         "model": cfg["model"],
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
         "temperature": temperature,
+        "max_tokens": 4096,
     }
-    with httpx.Client(timeout=90) as client:
+    timeout = httpx.Timeout(10.0, read=180.0, write=30.0, pool=10.0)
+    with httpx.Client(timeout=timeout) as client:
         resp = client.post(url, headers=headers, json=body)
         resp.raise_for_status()
         data = resp.json()
@@ -215,9 +241,11 @@ def _call_google(
         "generationConfig": {
             "temperature": temperature,
             "responseMimeType": "application/json",
+            "maxOutputTokens": 4096,
         },
     }
-    with httpx.Client(timeout=90) as client:
+    timeout = httpx.Timeout(10.0, read=180.0, write=30.0, pool=10.0)
+    with httpx.Client(timeout=timeout) as client:
         resp = client.post(url, headers=headers, json=body)
         resp.raise_for_status()
         data = resp.json()

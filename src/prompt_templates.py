@@ -62,6 +62,46 @@ scope_fit, comparison_notes, open_questions, recommendation, human_review_risks
 """
 
 
+def vendor_prompt(*, context: str, catalog: str, limit: int) -> str:
+    return f"""키워드: vendors
+역할: 중진공 AX 지원 담당자의 공급사 추천 보조.
+카탈로그에 있는 업체만 고르십시오. 새 업체를 만들지 마십시오.
+계약·단가를 보증하지 말고, 참고 추천임을 전제로 하십시오.
+
+기업·기초체력·과업 맥락:
+{context}
+
+공급사 카탈로그(id|name|category|summary|fit):
+{catalog}
+
+JSON 키:
+- summary: 추천 요지 2~3문장
+- recommendations: 길이 {limit} 이하 배열. 각 항목 {{id, score(1-10), why}}
+  - id는 카탈로그 id만
+  - why는 한국어 한 줄(영역·문제·과업과의 적합 이유)
+"""
+
+
+def policy_prompt(*, context: str, catalog: str, limit: int) -> str:
+    return f"""키워드: policies
+역할: 중진공 AX 지원 담당자의 정책·자금 연계 보조.
+카탈로그에 있는 정책만 고르십시오. 새 정책을 만들지 마십시오.
+공고 일정·자격은 매년 바뀌므로 단정하지 말고 참고 추천으로 쓰십시오.
+
+기업·기초체력·과업 맥락:
+{context}
+
+정책 카탈로그(id|name|org|category|summary|tags):
+{catalog}
+
+JSON 키:
+- summary: 추천 요지 2~3문장
+- recommendations: 길이 {limit} 이하 배열. 각 항목 {{id, score(1-10), why}}
+  - id는 카탈로그 id만
+  - why는 한국어 한 줄(왜 지금 이 정책인지)
+"""
+
+
 def build_fitness_context(fitness: dict[str, Any] | None) -> str:
     if not fitness:
         return "기초체력: 미실시"

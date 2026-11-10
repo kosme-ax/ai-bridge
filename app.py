@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.analysis import compare_quotations, generate_work_order
+from src.analysis import compare_quotations, generate_work_order, rank_policies, rank_vendors
 from src.config import runtime_settings
 from src.docs import read_upload
 from src.fitness import (
@@ -16,11 +16,11 @@ from src.fitness import (
     problems_for_areas,
     score_fitness,
 )
-from src.policies import POLICIES, recommend_policies
+from src.policies import POLICIES
 from src.reports import RFP_SECTION_ORDER, to_docx_bytes, to_pdf_bytes
 from src.sample_data import COMPANIES
 from src.ui import inject_styles, page_header, policy_card, render_footer, soft_card, vendor_card
-from src.vendors import VENDORS, recommend_vendors
+from src.vendors import VENDORS
 
 st.set_page_config(
     page_title="sme-ax-helper",
@@ -197,11 +197,34 @@ def render_education(fit: dict) -> None:
             st.link_button(link["title"], link["url"], use_container_width=True)
 
 
-def render_vendor_recs(company: dict, *, key_prefix: str) -> None:
-    wo = st.session_state.get("last_result") if st.session_state.get("last_title") == "AX과업지시서" else None
-    fit = st.session_state.get("fitness")
-    recs = recommend_vendors(company=company, work_order=wo, fitness=fit, limit=6)
-    for i, v in enumerate(recs):
+def _work_order_ctx() -> dict | None:
+    if st.session_state.get("last_title") == "AX과업지시서":
+        return st.session_state.get("last_result")
+    return None
+
+
+def render_vendor_recs(model_name: str, company: dict, *, key_prefix: str) -> None:
+    if st.button("AI 업체 추천", type="primary", use_container_width=True, key=f"{key_prefix}_run"):
+        with st.spinner("업체 추천 중…"):
+            result = rank_vendors(
+                model_name,
+                company,
+                work_order=_work_order_ctx(),
+                fitness=st.session_state.get("fitness"),
+                limit=6,
+            )
+        st.session_state.vendor_rank = result
+
+    result = st.session_state.get("vendor_rank")
+    if not result:
+        soft_card("AI 추천", "기초체력·과업지시서를 반영해 공급사를 추천합니다.")
+        return
+
+    meta = result.get("_meta") or {}
+    st.caption(f"{meta.get('model_name') or model_name} · {meta.get('mode')}")
+    if result.get("summary"):
+        soft_card("추천 요지", str(result["summary"]))
+    for i, v in enumerate(result.get("recommendations") or []):
         vendor_card(v)
         st.link_button(
             v["name"],
@@ -211,10 +234,28 @@ def render_vendor_recs(company: dict, *, key_prefix: str) -> None:
         )
 
 
-def render_policy_recs(company: dict, *, context: str, key_prefix: str) -> None:
-    fit = st.session_state.get("fitness")
-    recs = recommend_policies(fitness=fit, company=company, context=context, limit=3)
-    for i, p in enumerate(recs):
+def render_policy_recs(model_name: str, company: dict, *, context: str, key_prefix: str) -> None:
+    if st.button("AI 정책 추천", type="primary", use_container_width=True, key=f"{key_prefix}_run"):
+        with st.spinner("정책 추천 중…"):
+            result = rank_policies(
+                model_name,
+                company,
+                fitness=st.session_state.get("fitness"),
+                context_label=context,
+                limit=3,
+            )
+        st.session_state.policy_rank = result
+
+    result = st.session_state.get("policy_rank")
+    if not result:
+        soft_card("AI 추천", "기초체력·과업 맥락에 맞는 정책·자금을 추천합니다.")
+        return
+
+    meta = result.get("_meta") or {}
+    st.caption(f"{meta.get('model_name') or model_name} · {meta.get('mode')}")
+    if result.get("summary"):
+        soft_card("추천 요지", str(result["summary"]))
+    for i, p in enumerate(result.get("recommendations") or []):
         policy_card(p)
         st.link_button(
             "바로가기",
@@ -465,10 +506,10 @@ def page_work_order(model_name: str, company: dict) -> None:
         st.session_state.work_order_done = True
 
 
-def page_vendors(company: dict) -> None:
+def page_vendors(model_name: str, company: dict) -> None:
     st.session_state.vendors_viewed = True
-    page_header("업체", "맞는 업체를<br>골라 보세요", "참고용 추천입니다.")
-    render_vendor_recs(company, key_prefix="vd")
+    page_header("업체", "맞는 업체를<br>골라 보세요", "AI가 카탈로그에서 참고용으로 고릅니다.")
+    render_vendor_recs(model_name, company, key_prefix="vd")
     with st.expander(f"전체 {len(VENDORS)}개"):
         for i, v in enumerate(VENDORS):
             item = dict(v)
@@ -502,10 +543,10 @@ def page_quotes(model_name: str, company: dict) -> None:
             st.session_state.quotes_done = True
 
 
-def page_policies(company: dict) -> None:
+def page_policies(model_name: str, company: dict) -> None:
     st.session_state.policies_viewed = True
-    page_header("정책", "맞는 정책을<br>이어가요", "공식 공고를 확인하세요.")
-    render_policy_recs(company, context="work_order", key_prefix="pol_top")
+    page_header("정책", "맞는 정책을<br>이어가요", "AI 추천 후 공식 공고를 확인하세요.")
+    render_policy_recs(model_name, company, context="work_order", key_prefix="pol_top")
     with st.expander("전체 카탈로그"):
         for i, p in enumerate(POLICIES):
             item = dict(p)
@@ -541,11 +582,11 @@ def main() -> None:
     elif page == "과업지시서":
         page_work_order(model_name, company)
     elif page == "업체":
-        page_vendors(company)
+        page_vendors(model_name, company)
     elif page == "견적":
         page_quotes(model_name, company)
     else:
-        page_policies(company)
+        page_policies(model_name, company)
 
     render_footer()
 
